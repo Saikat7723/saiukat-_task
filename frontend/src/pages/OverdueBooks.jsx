@@ -5,12 +5,18 @@ import apiClient from '../api/axios';
 export const OverdueBooks = () => {
   const [overdueList, setOverdueList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [fineRate, setFineRate] = useState(null);
 
   const fetchOverdue = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get('/book-issues/overdue');
-      setOverdueList(res.data);
+      const [overdueRes, settingsRes] = await Promise.all([
+        apiClient.get('/book-issues/overdue'),
+        apiClient.get('/admin/settings')
+      ]);
+      setOverdueList(overdueRes.data);
+      const parsedRate = Number(settingsRes.data?.OVERDUE_FINE_PER_DAY);
+      setFineRate(Number.isFinite(parsedRate) && parsedRate > 0 ? parsedRate : null);
     } catch (e) {
       console.error(e);
     } finally {
@@ -41,7 +47,8 @@ export const OverdueBooks = () => {
             <Clock className="w-5 h-5 text-rose-400" />
             Overdue Books & Fine Management
           </h1>
-          <p className="text-xs text-slate-400 mt-1">Track books past due date with calculated overdue fine ($5/day)</p>
+          <p className="text-xs text-slate-400 mt-1">Track books past due date with the configured overdue fine rate.</p>
+          <p className="text-[11px] text-slate-500 mt-1">{fineRate === null ? 'No overdue fine rate configured.' : `Configured rate: ${fineRate.toFixed(2)} per day`}</p>
         </div>
         <div className="px-3.5 py-1.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold text-sm rounded-xl">
           {overdueList.length} Overdue Pending

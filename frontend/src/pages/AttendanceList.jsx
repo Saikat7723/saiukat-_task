@@ -48,12 +48,25 @@ export const AttendanceList = () => {
     fetchAttendance();
   }, [search, deptFilter, statusFilter, dateFrom, dateTo]);
 
-  const handleExportCSV = () => {
-    let exportUrl = '/api/attendance/export/csv?';
-    if (dateFrom) exportUrl += `date_from=${dateFrom}&`;
-    if (dateTo) exportUrl += `date_to=${dateTo}&`;
-    if (deptFilter) exportUrl += `department_id=${deptFilter}&`;
-    window.open(exportUrl, '_blank');
+  const handleExportCSV = async () => {
+    try {
+      const params = {};
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (deptFilter) params.department_id = deptFilter;
+      const response = await apiClient.get('/attendance/export/csv', { params, responseType: 'blob' });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `attendance_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Could not export attendance report', error);
+      alert('Could not export attendance report. Please try again.');
+    }
   };
 
   return (

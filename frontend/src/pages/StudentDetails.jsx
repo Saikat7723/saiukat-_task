@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import {
   User,
   CalendarCheck,
@@ -12,18 +12,33 @@ import {
   AlertCircle
 } from 'lucide-react';
 import apiClient from '../api/axios';
+import { WebcamCapture } from '../components/common/WebcamCapture';
 
 export const StudentDetails = () => {
   const { id } = useParams();
+  const location = useLocation();
   const [student, setStudent] = useState(null);
   const [summaryStats, setSummaryStats] = useState(null);
   const [attendanceSessions, setAttendanceSessions] = useState([]);
   const [bookIssues, setBookIssues] = useState([]);
   const [calendarData, setCalendarData] = useState(null);
   
-  const [selectedYear, setSelectedYear] = useState(2026);
-  const [selectedMonth, setSelectedMonth] = useState(9);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(true);
+  const [enrolling, setEnrolling] = useState(false);
+  const [savingPhoto, setSavingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const [notice, setNotice] = useState(location.state?.message || '');
+  const savePhoto = async blob => {
+    setSavingPhoto(true); setPhotoError('');
+    try {
+      const form = new FormData(); form.append('file', blob, 'profile.jpg');
+      const { data } = await apiClient.post(`/students/${id}/photo`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setStudent(data); setEnrolling(false);
+    } catch (error) { setPhotoError(error.response?.data?.detail || 'Could not enroll this photo. Please try again.'); }
+    finally { setSavingPhoto(false); }
+  };
 
   const fetchDetails = async () => {
     setLoading(true);
@@ -63,6 +78,9 @@ export const StudentDetails = () => {
   // Generate calendar grid for selected month
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const monthOptions = Array.from({ length: 12 }, (_, index) => ({ value: index + 1, label: new Date(2000, index, 1).toLocaleString([], { month: 'long' }) }));
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 6 }, (_, index) => currentYear - index);
 
   return (
     <div className="space-y-6">
@@ -70,6 +88,8 @@ export const StudentDetails = () => {
         <ArrowLeft className="w-4 h-4" />
         Back to Student Directory
       </Link>
+
+      {notice && <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs flex items-center justify-between" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice('')} className="text-emerald-200 hover:text-white" aria-label="Dismiss message">×</button></div>}
 
       {/* Header Profile Summary */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 shadow-xl">
@@ -90,9 +110,9 @@ export const StudentDetails = () => {
                 {student.status}
               </span>
             </div>
-            <p className="text-xs font-mono text-cyan-400 mt-0.5">Roll / Student ID: {student.student_id}</p>
+            <p className="text-xs font-mono text-cyan-400 mt-0.5">Roll Number: {student.student_id}</p>
             <p className="text-xs text-slate-400 mt-1">
-              {student.department?.name || 'Department'} • {student.course?.name || 'Course'}
+              {student.department?.name || '—'} · {student.course?.name || '—'}
             </p>
           </div>
         </div>
@@ -104,11 +124,17 @@ export const StudentDetails = () => {
           </div>
           <div className="bg-slate-950/60 border border-slate-800 px-4 py-2.5 rounded-xl text-center">
             <span className="text-[10px] text-slate-400 block font-medium">Phone</span>
-            <span className="text-slate-200 font-semibold">{student.phone || 'N/A'}</span>
+            <span className="text-slate-200 font-semibold">{student.phone || '—'}</span>
           </div>
         </div>
       </div>
 
+      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+        <p className={student.has_face_profile ? 'text-emerald-300' : 'text-amber-300'}>{student.has_face_profile ? 'Face enrolled for automatic attendance' : 'Face enrollment required: capture a clear, current photo.'}</p>
+        <button onClick={() => setEnrolling(!enrolling)} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm">{enrolling ? 'Close camera' : student.has_face_profile ? 'Update face photo' : 'Enrol face'}</button>
+        {photoError && <p role="alert" className="text-rose-300">{photoError}</p>}
+        {enrolling && <div className="max-w-lg"><WebcamCapture onCaptureConfirmed={savePhoto} isSubmitting={savingPhoto} /></div>}
+      </section>
       {/* Attendance Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 text-center">
@@ -150,18 +176,14 @@ export const StudentDetails = () => {
               onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
               className="py-1.5 px-3 bg-slate-950/60 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
             >
-              <option value={9}>September</option>
-              <option value={10}>October</option>
-              <option value={11}>November</option>
-              <option value={12}>December</option>
+              {monthOptions.map(month => <option key={month.value} value={month.value}>{month.label}</option>)}
             </select>
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(parseInt(e.target.value))}
               className="py-1.5 px-3 bg-slate-950/60 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
             >
-              <option value={2026}>2026</option>
-              <option value={2025}>2025</option>
+              {yearOptions.map(year => <option key={year} value={year}>{year}</option>)}
             </select>
           </div>
         </div>

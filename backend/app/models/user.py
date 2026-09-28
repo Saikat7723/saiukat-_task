@@ -6,6 +6,7 @@ from app.database.session import Base
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
     LIBRARIAN = "librarian"
+    STUDENT = "student"
 
 class Admin(Base):
     __tablename__ = "admins"

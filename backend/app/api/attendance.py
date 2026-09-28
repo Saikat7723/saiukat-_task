@@ -83,19 +83,13 @@ def list_attendance_sessions(
 @router.post("/events")
 def receive_attendance_event(
     event_in: AttendanceEventCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user)
 ):
     """
     Receives face recognition events sent by the standalone camera / face recognition microservice.
     """
-    result = AttendanceEngine.process_recognition_event(
-        db=db,
-        student_id=event_in.student_id,
-        confidence=event_in.confidence,
-        camera_id=event_in.camera_id,
-        timestamp=event_in.timestamp
-    )
-    return result
+    raise HTTPException(status_code=410, detail="Client-supplied matches are disabled. Submit a camera image to /recognition/frame.")
 
 @router.post("/manual", response_model=AttendanceSessionResponse)
 def create_manual_attendance(
@@ -181,8 +175,8 @@ def get_student_attendance_summary(
 @router.get("/student/{student_id}/calendar")
 def get_student_attendance_calendar(
     student_id: int,
-    year: int = Query(2026),
-    month: int = Query(9),
+    year: Optional[int] = Query(None),
+    month: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: Admin = Depends(get_current_user)
 ):
@@ -190,6 +184,9 @@ def get_student_attendance_calendar(
     Returns calendar data for a specific student for a given year & month.
     Visual states: Present, Absent, Holiday, Leave, No Data
     """
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
     sessions = db.query(AttendanceSession).filter(
         AttendanceSession.student_id == student_id,
         func.extract('year', AttendanceSession.session_date) == year,

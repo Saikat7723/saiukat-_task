@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.database.session import get_db
 from app.models.user import Admin, UserRole
+from app.models.student import Student
 
 # Password context supporting argon2 and bcrypt
 pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
@@ -38,16 +39,58 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        subject: str = payload.get("sub")
+        role: str = payload.get("role")
+        if subject is None or role == UserRole.STUDENT.value:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    user = db.query(Admin).filter(Admin.email == email, Admin.is_active == True).first()
+    user = db.query(Admin).filter(Admin.email == subject, Admin.is_active == True).first()
     if user is None:
         raise credentials_exception
     return user
+
+
+def get_current_student(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Student:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate student credentials or token expired",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        subject = payload.get("sub")
+        if payload.get("role") != UserRole.STUDENT.value or not subject:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    student = db.query(Student).filter(
+        (Student.email == subject) | (Student.student_id == subject),
+        Student.status == "Active",
+    ).first()
+    if student is None:
+        raise credentials_exception
+    return student
+
+
+def get_current_principal(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Return either Admin or Student for shared endpoints such as logout."""
+    credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials")
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        subject, role = payload.get("sub"), payload.get("role")
+    except JWTError:
+        raise credentials_exception
+    if role == UserRole.STUDENT.value:
+        principal = db.query(Student).filter(
+            (Student.email == subject) | (Student.student_id == subject), Student.status == "Active"
+        ).first()
+    else:
+        principal = db.query(Admin).filter(Admin.email == subject, Admin.is_active == True).first()
+    if principal is None:
+        raise credentials_exception
+    return principal
 
 def require_admin(current_user: Admin = Depends(get_current_user)) -> Admin:
     if current_user.role != UserRole.ADMIN:

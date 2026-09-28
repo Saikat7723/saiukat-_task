@@ -29,8 +29,8 @@ def list_cameras(db: Session = Depends(get_db), current_user: Admin = Depends(ge
 def add_camera(
     camera_code: str,
     name: str,
-    location: str = "Main Entrance",
-    stream_url: str = "0",
+    location: str,
+    stream_url: str,
     db: Session = Depends(get_db),
     current_user: Admin = Depends(require_admin)
 ):

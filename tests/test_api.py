@@ -2,6 +2,7 @@ import sys
 import os
 import pytest
 from datetime import date, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
 # Add backend directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
@@ -115,6 +116,7 @@ def test_student_crud(client):
         "full_name": "Test Student",
         "email": "test.student@univ.edu",
         "phone": "9998887770",
+        "password": "student-pass-123",
         "department_id": 1,
         "course_id": 1,
         "status": "Active"
@@ -157,6 +159,22 @@ def test_book_issue_and_return(client):
     assert return_res.status_code == 200
     assert return_res.json()["status"] == "RETURNED"
 
+
+def test_book_issue_rejects_past_due_date(client):
+    login_res = client.post("/api/auth/login", json={
+        "username_or_email": "admin@test.com",
+        "password": "password123"
+    })
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+    response = client.post("/api/book-issues", json={
+        "student_id": 1,
+        "book_id": 1,
+        "issue_date": date.today().isoformat(),
+        "due_date": (date.today() - timedelta(days=1)).isoformat(),
+    }, headers=headers)
+    assert response.status_code == 400
+    assert "Due date" in response.json()["detail"]
+
 def test_dashboard_summary(client):
     login_res = client.post("/api/auth/login", json={
         "username_or_email": "admin@test.com",
@@ -170,3 +188,29 @@ def test_dashboard_summary(client):
     data = res.json()
     assert "total_students" in data
     assert "total_books" in data
+
+
+def test_password_reset_is_single_use(client):
+    request = client.post("/api/auth/forgot-password", json={
+        "email": "admin@test.com",
+        "account_type": "admin",
+    })
+    assert request.status_code == 200
+    reset_url = request.json()["reset_url"]
+    token = parse_qs(urlparse(reset_url).query)["token"][0]
+
+    reset = client.post("/api/auth/reset-password", json={
+        "token": token,
+        "new_password": "new-password-456",
+    })
+    assert reset.status_code == 200
+    assert client.post("/api/auth/login", json={
+        "username_or_email": "admin@test.com",
+        "password": "new-password-456",
+    }).status_code == 200
+
+    reused = client.post("/api/auth/reset-password", json={
+        "token": token,
+        "new_password": "another-password-789",
+    })
+    assert reused.status_code == 400

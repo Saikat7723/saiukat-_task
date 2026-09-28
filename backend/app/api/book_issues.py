@@ -6,10 +6,12 @@ from sqlalchemy import or_, and_
 
 from app.database.session import get_db
 from app.models.book import Book, BookIssue
+from app.models.attendance import AttendanceSetting
 from app.models.student import Student
 from app.models.system import AuditLog
 from app.schemas.book import BookIssueCreate, BookReturnRequest, BookIssueResponse
 from app.core.security import get_current_user, Admin
+from app.core.config import settings
 
 router = APIRouter(prefix="/book-issues", tags=["Book Issues"])
 
@@ -29,7 +31,9 @@ def list_book_issues(
         query = query.filter(BookIssue.student_id == student_id)
     if book_id:
         query = query.filter(BookIssue.book_id == book_id)
-    if status_filter:
+    if status_filter == "ACTIVE":
+        query = query.filter(BookIssue.status.in_(["ISSUED", "OVERDUE"]), BookIssue.return_date.is_(None))
+    elif status_filter:
         query = query.filter(BookIssue.status == status_filter)
 
     issues = query.order_by(BookIssue.created_at.desc()).offset(skip).limit(limit).all()
@@ -59,6 +63,10 @@ def issue_book(
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
 
+    issue_date = issue_in.issue_date or date.today()
+    if issue_in.due_date < issue_date:
+        raise HTTPException(status_code=400, detail="Due date must be on or after the issue date.")
+
     if book.available_copies <= 0:
         raise HTTPException(status_code=400, detail=f"Book '{book.title}' is currently out of stock (0 available copies)")
 
@@ -76,7 +84,6 @@ def issue_book(
     if book.available_copies == 0:
         book.status = "Out of Stock"
 
-    issue_date = issue_in.issue_date or date.today()
     new_issue = BookIssue(
         student_id=student.id,
         book_id=book.id,
@@ -124,11 +131,18 @@ def return_book(
 
     ret_date = return_in.return_date or date.today()
 
-    # Calculate fine ($5 per overdue day if not explicitly passed)
+    # Calculate the configured fine per overdue day. A blank setting means fines are disabled.
     calculated_fine = return_in.fine_amount or 0.0
     if ret_date > issue.due_date:
         overdue_days = (ret_date - issue.due_date).days
-        calculated_fine = float(overdue_days * 5.0)
+        fine_setting = db.query(AttendanceSetting).filter(
+            AttendanceSetting.setting_key == "OVERDUE_FINE_PER_DAY"
+        ).first()
+        try:
+            rate = float(fine_setting.setting_value) if fine_setting and fine_setting.setting_value else settings.OVERDUE_FINE_PER_DAY
+        except (TypeError, ValueError):
+            rate = settings.OVERDUE_FINE_PER_DAY
+        calculated_fine = round(overdue_days * max(0.0, rate), 2)
 
     issue.return_date = ret_date
     issue.fine_amount = calculated_fine

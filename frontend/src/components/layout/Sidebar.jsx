@@ -93,13 +93,13 @@ export const Sidebar = ({ isOpen, setIsOpen }) => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5 overflow-hidden">
             <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-cyan-400 font-bold text-xs shrink-0">
-              {user?.full_name ? user.full_name.charAt(0) : 'A'}
+              {user?.full_name ? user.full_name.charAt(0) : '?'}
             </div>
             <div className="truncate">
-              <p className="text-xs font-semibold text-slate-200 truncate">{user?.full_name || 'Admin User'}</p>
+              <p className="text-xs font-semibold text-slate-200 truncate">{user?.full_name || ''}</p>
               <p className="text-[10px] text-slate-400 capitalize flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3 text-cyan-400" />
-                {user?.role || 'Admin'}
+                {user?.role || ''}
               </p>
             </div>
           </div>

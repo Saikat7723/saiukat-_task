@@ -10,24 +10,51 @@ const videoConstraints = {
 
 export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
   const webcamRef = useRef(null);
+  const [ready, setReady] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
+  const [capturedBlob, setCapturedBlob] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
   const capture = useCallback(() => {
     const imageSrc = webcamRef.current?.getScreenshot();
     if (imageSrc) {
       setCapturedImage(imageSrc);
+      setCapturedBlob(null);
       setErrorMsg(null);
     }
   }, [webcamRef]);
 
   const retake = () => {
+    if (capturedBlob && capturedImage?.startsWith('blob:')) URL.revokeObjectURL(capturedImage);
     setCapturedImage(null);
+    setCapturedBlob(null);
+    setErrorMsg(null);
+  };
+
+  const handleFile = event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('Please choose an image file.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('Image must be smaller than 5 MB.');
+      event.target.value = '';
+      return;
+    }
+    setCapturedBlob(file);
+    setCapturedImage(URL.createObjectURL(file));
     setErrorMsg(null);
   };
 
   const confirmImage = () => {
     if (capturedImage && onCaptureConfirmed) {
+      if (capturedBlob) {
+        onCaptureConfirmed(capturedBlob, capturedImage);
+        return;
+      }
       // Convert base64 to Blob
       fetch(capturedImage)
         .then(res => res.blob())
@@ -48,7 +75,7 @@ export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
           Live Student Photo Capture
         </span>
         <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          Camera Active
+          {ready && !capturedImage ? 'Camera active' : capturedImage ? 'Photo captured' : 'Waiting for camera'}
         </span>
       </div>
 
@@ -57,6 +84,8 @@ export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
           <>
             <Webcam
               audio={false}
+              onUserMedia={() => { setReady(true); setErrorMsg(null); }}
+              onUserMediaError={() => { setReady(false); setErrorMsg('Camera unavailable. Allow camera access in your browser and reconnect the camera.'); }}
               ref={webcamRef}
               screenshotFormat="image/jpeg"
               videoConstraints={videoConstraints}
@@ -86,6 +115,7 @@ export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
           <button
             type="button"
             onClick={capture}
+            disabled={!ready || isSubmitting}
             className="flex-1 py-2.5 px-4 bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-sm rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-cyan-600/20"
           >
             <Camera className="w-4 h-4" />
@@ -114,6 +144,10 @@ export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
           </>
         )}
       </div>
+      {!capturedImage && <label className="mt-3 w-full cursor-pointer rounded-lg border border-dashed border-slate-700 px-3 py-2 text-center text-xs text-slate-400 hover:border-cyan-500 hover:text-cyan-300">
+        Upload a profile photo instead
+        <input type="file" accept="image/*" onChange={handleFile} className="sr-only" />
+      </label>}
     </div>
   );
 };

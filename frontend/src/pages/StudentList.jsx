@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   UserPlus,
   Search,
-  Filter,
   Eye,
   Edit,
   UserX,
   CheckCircle2,
-  XCircle,
-  Camera
+  Camera,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import apiClient from '../api/axios';
 
@@ -20,10 +20,11 @@ export const StudentList = () => {
   const [selectedDept, setSelectedDept] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
+  const [errorMsg, setErrorMsg] = useState('');
 
   const fetchStudents = async () => {
     setLoading(true);
+    setErrorMsg('');
     try {
       let url = '/students?limit=200';
       if (search) url += `&search=${encodeURIComponent(search)}`;
@@ -33,7 +34,8 @@ export const StudentList = () => {
       const res = await apiClient.get(url);
       setStudents(res.data);
     } catch (err) {
-      console.error('Error fetching students', err);
+      setStudents([]);
+      setErrorMsg(err.response?.data?.detail || 'Student records could not be loaded. Check the connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -42,9 +44,9 @@ export const StudentList = () => {
   const fetchDepartments = async () => {
     try {
       const res = await apiClient.get('/admin/departments');
-      setDepartments(res.data);
+      setDepartments(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
-      console.error(e);
+      setErrorMsg(e.response?.data?.detail || 'Department filters could not be loaded.');
     }
   };
 
@@ -62,7 +64,7 @@ export const StudentList = () => {
         await apiClient.delete(`/students/${id}`);
         fetchStudents();
       } catch (err) {
-        alert(err.response?.data?.detail || 'Could not deactivate student');
+        setErrorMsg(err.response?.data?.detail || 'Could not deactivate student.');
       }
     }
   };
@@ -72,16 +74,15 @@ export const StudentList = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 p-6 rounded-2xl">
         <div>
           <h1 className="text-xl font-bold text-slate-100">Student Directory</h1>
-          <p className="text-xs text-slate-400 mt-1">Manage enrolled students, profile photos & face recognition profiles</p>
+          <p className="text-xs text-slate-400 mt-1">Manage registered students, profile photos and face recognition profiles</p>
         </div>
-        <Link
-          to="/students/new"
-          className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-600/20 flex items-center justify-center gap-2 transition"
-        >
-          <UserPlus className="w-4 h-4" />
-          Register New Student
-        </Link>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={fetchStudents} disabled={loading} className="p-2.5 rounded-xl border border-slate-700 text-slate-300 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50" title="Refresh student records"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+          <Link to="/students/new" className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-600/20 flex items-center justify-center gap-2 transition"><UserPlus className="w-4 h-4" /> Register New Student</Link>
+        </div>
       </div>
+
+      {errorMsg && <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2" role="alert"><AlertTriangle className="w-4 h-4 shrink-0" />{errorMsg}</div>}
 
       {/* Search & Filter Bar */}
       <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex flex-col md:flex-row items-center gap-4">
@@ -146,7 +147,7 @@ export const StudentList = () => {
               ) : students.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-8 text-slate-400">
-                    No students registered yet.
+                    {search || selectedDept || statusFilter ? 'No students match the selected filters.' : 'No students have been registered yet.'}
                   </td>
                 </tr>
               ) : (
@@ -157,7 +158,7 @@ export const StudentList = () => {
                         {student.profile_photo_path ? (
                           <img src={student.profile_photo_path} alt="" className="w-full h-full object-cover" />
                         ) : (
-                          student.full_name.charAt(0)
+                          student.full_name?.charAt(0)?.toUpperCase() || '?'
                         )}
                       </div>
                       <div>
@@ -171,10 +172,10 @@ export const StudentList = () => {
                       {student.student_id}
                     </td>
                     <td className="px-5 py-3.5">
-                      {student.department?.name || 'N/A'}
+                      {student.department?.name || '—'}
                     </td>
                     <td className="px-5 py-3.5 text-slate-300">
-                      {student.phone || '-'}
+                      {student.phone || '—'}
                     </td>
                     <td className="px-5 py-3.5">
                       {student.has_face_profile ? (

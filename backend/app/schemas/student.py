@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import date, datetime
 
@@ -16,7 +16,7 @@ class StudentBase(BaseModel):
     status: str = "Active"
 
 class StudentCreate(StudentBase):
-    pass
+    password: str = Field(min_length=8, max_length=128)
 
 class StudentUpdate(BaseModel):
     full_name: Optional[str] = None

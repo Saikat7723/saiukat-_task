@@ -44,12 +44,25 @@ export const AttendanceReports = () => {
     fetchReportData();
   }, [selectedDept, dateFrom, dateTo]);
 
-  const handleExportCSV = () => {
-    let exportUrl = '/api/attendance/export/csv?';
-    if (dateFrom) exportUrl += `date_from=${dateFrom}&`;
-    if (dateTo) exportUrl += `date_to=${dateTo}&`;
-    if (selectedDept) exportUrl += `department_id=${selectedDept}&`;
-    window.open(exportUrl, '_blank');
+  const handleExportCSV = async () => {
+    try {
+      const params = {};
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (selectedDept) params.department_id = selectedDept;
+      const response = await apiClient.get('/attendance/export/csv', { params, responseType: 'blob' });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `attendance_report_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Could not export attendance report', error);
+      alert('Could not export attendance report. Please try again.');
+    }
   };
 
   const handlePrint = () => {
@@ -133,7 +146,7 @@ export const AttendanceReports = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 print:divide-gray-200">
-              {sessions.map((s, idx) => (
+              {loading ? <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">Loading attendance records...</td></tr> : sessions.length === 0 ? <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500">No attendance records match the selected filters.</td></tr> : sessions.map((s, idx) => (
                 <tr key={s.id} className="hover:bg-slate-800/40">
                   <td className="px-4 py-3">{idx + 1}</td>
                   <td className="px-4 py-3 font-semibold text-slate-200 print:text-gray-900">{s.student?.full_name}</td>

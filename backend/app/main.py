@@ -1,4 +1,5 @@
 import os
+from sqlalchemy import inspect, text
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,8 @@ from app.api.books import router as book_router
 from app.api.book_issues import router as book_issue_router
 from app.api.dashboard import router as dashboard_router
 from app.api.admin import router as admin_router
+from app.api.recognition import router as recognition_router
+from app.api.student_portal import router as student_portal_router
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -42,11 +45,17 @@ app.include_router(book_router, prefix=settings.API_V1_STR)
 app.include_router(book_issue_router, prefix=settings.API_V1_STR)
 app.include_router(dashboard_router, prefix=settings.API_V1_STR)
 app.include_router(admin_router, prefix=settings.API_V1_STR)
+app.include_router(recognition_router, prefix=settings.API_V1_STR)
+app.include_router(student_portal_router, prefix=settings.API_V1_STR)
 
 @app.on_event("startup")
 def startup_event():
     # Ensure database tables exist
     Base.metadata.create_all(bind=engine)
+    # Development databases created before student login was introduced need this additive column.
+    if "hashed_password" not in {column["name"] for column in inspect(engine).get_columns("students")}:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE students ADD COLUMN hashed_password VARCHAR(255)"))
 
 @app.get("/")
 def root():

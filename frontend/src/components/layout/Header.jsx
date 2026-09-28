@@ -1,9 +1,16 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Menu, Camera } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import apiClient from '../../api/axios';
 
 export const Header = ({ onToggleSidebar }) => {
   const { user } = useAuth();
+  const [camera, setCamera] = useState(null);
+  useEffect(() => {
+    let active = true;
+    apiClient.get('/recognition/status').then(({ data }) => active && setCamera(data)).catch(() => active && setCamera({ ready: false }));
+    return () => { active = false; };
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 h-16 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-4 md:px-6 flex items-center justify-between">
@@ -18,8 +25,8 @@ export const Header = ({ onToggleSidebar }) => {
         </button>
         <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400 bg-slate-950/60 border border-slate-800 px-3 py-1.5 rounded-lg">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-          <span>Entrance Camera 01:</span>
-          <span className="text-emerald-400 font-semibold">Active & Monitoring</span>
+          <span>{camera?.camera_id || 'Browser camera'}:</span>
+          <span className={`font-semibold ${camera?.ready ? 'text-emerald-400' : 'text-amber-400'}`}>{camera?.ready ? 'Ready' : 'Unavailable'}</span>
         </div>
       </div>
 
@@ -36,11 +43,11 @@ export const Header = ({ onToggleSidebar }) => {
 
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-cyan-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold text-xs">
-            {user?.full_name ? user.full_name.charAt(0) : 'A'}
+            {user?.full_name ? user.full_name.charAt(0) : '?'}
           </div>
           <div className="hidden min-w-0 md:block text-left">
-            <p className="truncate text-xs font-semibold text-slate-200">{user?.full_name || 'Admin User'}</p>
-            <p className="text-[10px] text-slate-400 capitalize">{user?.role || 'Admin'}</p>
+            <p className="truncate text-xs font-semibold text-slate-200">{user?.full_name || ''}</p>
+            <p className="text-[10px] text-slate-400 capitalize">{user?.role || ''}</p>
           </div>
         </div>
       </div>

@@ -68,6 +68,8 @@ export const Dashboard = () => {
     item.student?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
     item.student?.student_id?.toLowerCase().includes(search.toLowerCase())
   );
+  const hasAttendanceData = attendanceChart.some(point => point.present > 0 || point.absent > 0);
+  const hasLibraryData = [librarySummary?.available, librarySummary?.issued, librarySummary?.overdue].some(value => Number(value) > 0);
 
   return (
     <div className="space-y-6">
@@ -175,7 +177,7 @@ export const Dashboard = () => {
             </span>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            {!hasAttendanceData ? <div className="h-full flex items-center justify-center text-sm text-slate-500">No attendance records have been recorded yet.</div> : <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={attendanceChart}>
                 <defs>
                   <linearGradient id="attendanceGradient" x1="0" y1="0" x2="0" y2="1">
@@ -191,7 +193,7 @@ export const Dashboard = () => {
                 />
                 <Area type="monotone" dataKey="present" stroke="#38bdf8" strokeWidth={2} fillOpacity={1} fill="url(#attendanceGradient)" />
               </AreaChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer>}
           </div>
         </div>
 
@@ -200,11 +202,11 @@ export const Dashboard = () => {
           <h2 className="text-sm font-bold text-slate-200 mb-1">Library Stock Breakdown</h2>
           <p className="text-[11px] text-slate-400 mb-4">Available vs Issued vs Overdue Books</p>
           <div className="h-52 flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
+            {!hasLibraryData ? <p className="text-sm text-slate-500 text-center">No books have been added to the catalogue yet.</p> : <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={[
-                    { name: 'Available', value: librarySummary?.available || 1 },
+                    { name: 'Available', value: librarySummary?.available || 0 },
                     { name: 'Issued', value: librarySummary?.issued || 0 },
                     { name: 'Overdue', value: librarySummary?.overdue || 0 }
                   ]}
@@ -219,13 +221,13 @@ export const Dashboard = () => {
                 </Pie>
                 <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }} />
               </PieChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer>}
           </div>
-          <div className="flex items-center justify-center gap-4 text-xs mt-2">
+          {hasLibraryData && <div className="flex items-center justify-center gap-4 text-xs mt-2">
             <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span> Available</div>
             <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> Issued</div>
             <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-rose-400"></span> Overdue</div>
-          </div>
+          </div>}
         </div>
       </div>
 

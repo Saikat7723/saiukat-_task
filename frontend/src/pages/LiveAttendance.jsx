@@ -1,306 +1,168 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import Webcam from 'react-webcam';
-import { Camera, CheckCircle2, UserCheck } from 'lucide-react';
+import { Camera, CheckCircle2, Maximize, AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import apiClient from '../api/axios';
 
+const messages = error => typeof error.response?.data?.detail === 'string'
+  ? error.response.data.detail : 'Recognition server unavailable. Retrying automatically…';
+
 export const LiveAttendance = () => {
-  const [cameraStatus, setCameraStatus] = useState({
-    status: 'ONLINE',
-    camera_id: 'CAM-MAIN-ENTRANCE-01',
-    fps: 30.0,
-    detected_faces_count: 1,
-    last_recognized: null
-  });
-
-  const [lastRecognizedStudent, setLastRecognizedStudent] = useState({
-    id: 1,
-    student_id: 'STU001',
-    full_name: 'Rahul Kumar',
-    email: 'rahul.kumar@student.edu',
-    profile_photo_path: null,
-    confidence: 0.91,
-    timestamp: new Date().toLocaleTimeString(),
-    action: 'CHECK_IN'
-  });
-
-  const [recentEvents, setRecentEvents] = useState([]);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [completionNotice, setCompletionNotice] = useState(null);
-  const webcamRef = useRef(null);
-  const completionTimerRef = useRef(null);
-
-  const playAttendanceConfirmedSound = () => {
-    try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      const context = new AudioContext();
-      const now = context.currentTime;
-
-      [659.25, 783.99].forEach((frequency, index) => {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(frequency, now + index * 0.14);
-        gain.gain.setValueAtTime(0.0001, now + index * 0.14);
-        gain.gain.exponentialRampToValueAtTime(0.12, now + index * 0.14 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.14 + 0.22);
-        oscillator.connect(gain).connect(context.destination);
-        oscillator.start(now + index * 0.14);
-        oscillator.stop(now + index * 0.14 + 0.24);
-      });
-
-      window.setTimeout(() => context.close(), 550);
-    } catch (error) {
-      // Audio can be unavailable or blocked by browser/device settings.
-      console.warn('Attendance confirmation sound could not be played.', error);
-    }
-  };
-
-  const showAttendanceCompleted = (result) => {
-    const student = result.student;
-    const action = result.action === 'CHECK_OUT' ? 'checked out' : 'checked in';
-    const displayName = student?.full_name || 'Student';
-
-    setCompletionNotice({
-      title: 'Attendance completed',
-      message: result.message || `${displayName} was ${action} successfully.`,
-      action: result.action
-    });
-    playAttendanceConfirmedSound();
-
-    if (student) {
-      setLastRecognizedStudent({
-        id: student.id,
-        student_id: student.student_id,
-        full_name: student.full_name,
-        email: student.email || '',
-        profile_photo_path: student.photo || student.profile_photo_path || null,
-        confidence: result.confidence || 0.94,
-        timestamp: result.timestamp ? new Date(result.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
-        action: result.action
-      });
-    }
-
-    window.clearTimeout(completionTimerRef.current);
-    completionTimerRef.current = window.setTimeout(() => setCompletionNotice(null), 5000);
-  };
-
-  const fetchRecentEvents = async () => {
-    try {
-      const res = await apiClient.get('/attendance?limit=15');
-      setRecentEvents(res.data);
-      if (res.data.length > 0 && res.data[0].student) {
-        const top = res.data[0];
-        setLastRecognizedStudent({
-          id: top.student.id,
-          student_id: top.student.student_id,
-          full_name: top.student.full_name,
-          email: top.student.email,
-          profile_photo_path: top.student.profile_photo_path,
-          confidence: top.confidence || 0.92,
-          timestamp: new Date(top.check_in_time).toLocaleTimeString(),
-          action: top.check_out_time ? 'CHECK_OUT' : 'CHECK_IN'
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  const webcam = useRef(null);
+  const panel = useRef(null);
+  const cameraId = useRef('');
+  const [cameraReady, setCameraReady] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const [serverError, setServerError] = useState('');
+  const [result, setResult] = useState(null);
+  const [lastMatch, setLastMatch] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [setup, setSetup] = useState(null);
+  const [aspect, setAspect] = useState(4 / 3);
+  const [rate, setRate] = useState(0);
+  const seen = useRef(new Set());
 
   useEffect(() => {
-    fetchRecentEvents();
-    const interval = setInterval(fetchRecentEvents, 4000);
-    return () => clearInterval(interval);
+    let disposed = false, timer, controller;
+    const inspect = async () => {
+      controller = new AbortController();
+      try {
+        const { data } = await apiClient.get('/recognition/status', { signal: controller.signal, timeout: 10000 });
+        if (!disposed) {
+          setSetup(data);
+          if (data.camera_id) cameraId.current = data.camera_id;
+        }
+      } catch (error) {
+        if (!disposed) setServerError(messages(error));
+      }
+      if (!disposed) timer = setTimeout(inspect, 15000);
+    };
+    inspect();
+    return () => { disposed = true; clearTimeout(timer); controller?.abort(); };
   }, []);
 
-  useEffect(() => () => window.clearTimeout(completionTimerRef.current), []);
+  useEffect(() => {
+    let lock, disposed = false;
+    const keepAwake = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const nextLock = await navigator.wakeLock?.request('screen');
+        if (disposed) await nextLock?.release(); else lock = nextLock;
+      } catch { /* Screen wake lock is optional and depends on browser policy. */ }
+    };
+    keepAwake();
+    document.addEventListener('visibilitychange', keepAwake);
+    return () => { disposed = true; lock?.release(); document.removeEventListener('visibilitychange', keepAwake); };
+  }, []);
 
-  // Trigger test face recognition check-in simulation
-  const handleSimulateCheckin = async () => {
-    setIsSimulating(true);
-    try {
-      // Pick student 1 or 2
-      const res = await apiClient.post('/attendance/events', {
-        student_id: 1,
-        confidence: 0.94,
-        camera_id: 'CAM-MAIN-ENTRANCE-01'
-      });
-      if (res.data?.success && ['CHECK_IN', 'CHECK_OUT'].includes(res.data.action)) {
-        showAttendanceCompleted(res.data);
+  useEffect(() => {
+    if (!cameraReady) return;
+    let disposed = false, timer, controller;
+    const scan = async () => {
+      const video = webcam.current?.video;
+      if (!video || video.readyState < 2 || !video.srcObject?.getVideoTracks().some(t => t.readyState === 'live')) {
+        if (!disposed) { setResult(null); setRate(0); timer = setTimeout(scan, 1000); }
+        return;
       }
-      fetchRecentEvents();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSimulating(false);
-    }
+      const started = performance.now();
+      controller = new AbortController();
+      try {
+        const screenshot = webcam.current.getScreenshot();
+        if (!screenshot) throw new Error('No camera frame available');
+        const blob = await (await fetch(screenshot)).blob();
+        const form = new FormData();
+        form.append('file', blob, 'frame.jpg');
+        if (!cameraId.current) cameraId.current = `browser-${crypto.randomUUID().slice(0, 20)}`;
+        form.append('camera_id', cameraId.current);
+        const { data } = await apiClient.post('/recognition/frame', form, {
+          headers: { 'Content-Type': 'multipart/form-data' }, timeout: 15000, signal: controller.signal,
+        });
+        if (disposed) return;
+        setServerError('');
+        setResult(data);
+        setAspect(data.width / data.height);
+        setRate(1000 / (performance.now() - started + 450));
+        const attendance = data.attendance;
+        if (attendance?.success && ['CHECK_IN', 'ALREADY_RECORDED'].includes(attendance.action)) {
+          const match = { ...attendance, captured: screenshot };
+          setLastMatch(match);
+          if (!seen.current.has(attendance.session_id)) {
+            seen.current.add(attendance.session_id);
+            if (seen.current.size > 500) seen.current.delete(seen.current.values().next().value);
+            setEvents(previous => [match, ...previous].slice(0, 20));
+          }
+        }
+      } catch (error) {
+        if (!disposed) { setServerError(messages(error)); setResult(null); setRate(0); }
+      }
+      // Back pressure: only one frame request at a time, with automatic retry.
+      if (!disposed) timer = setTimeout(scan, 450);
+    };
+    scan();
+    return () => { disposed = true; clearTimeout(timer); controller?.abort(); };
+  }, [cameraReady]);
+
+  const handleCamera = stream => {
+    setCameraError(''); setCameraReady(true);
+    const track = stream.getVideoTracks()[0];
+    const { width, height } = track.getSettings();
+    if (width && height) setAspect(width / height);
+    track.onended = () => { setCameraReady(false); setCameraError('Camera disconnected. Reconnect it and reload this page.'); };
   };
+  const faceResult = result?.attendance;
+  const confirmed = faceResult?.success && ['CHECK_IN', 'ALREADY_RECORDED'].includes(faceResult.action);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 p-6 rounded-2xl">
+    <div ref={panel} className="space-y-5 bg-slate-950 p-4 text-slate-100 min-h-screen overflow-auto">
+      <header className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <Camera className="w-5 h-5 text-cyan-400" />
-            Live Entrance Attendance Monitor
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">Automatic real-time face recognition check-in & check-out monitoring</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><Camera className="text-cyan-400" />Automatic Attendance</h1>
+          <p className="text-sm text-slate-400 mt-1">Face the camera. Attendance is saved automatically after your face is verified.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleSimulateCheckin}
-            disabled={isSimulating}
-            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-emerald-600/20 transition flex items-center gap-2 disabled:opacity-50"
-          >
-            <UserCheck className="w-4 h-4" />
-            {isSimulating ? 'Recording attendance...' : 'Simulate Entrance Camera Match'}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Columns: Live Camera Feed & Bounding Box Overlay */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl">
-            <div className="flex items-center justify-between mb-3 px-1">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                <span className="text-xs font-bold text-slate-200">Main Library Entrance Stream</span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
-                  {cameraStatus.camera_id}
-                </span>
-              </div>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-slate-400">FPS: <strong className="text-cyan-400">{cameraStatus.fps}</strong></span>
-                <span className="text-slate-400">Faces: <strong className="text-emerald-400">1 Detected</strong></span>
-              </div>
-            </div>
-
-            {/* Camera Frame Box */}
-            <div className="relative w-full aspect-video bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
-              <Webcam
-                audio={false}
-                ref={webcamRef}
-                screenshotFormat="image/jpeg"
-                className="w-full h-full object-cover"
-              />
-
-              {/* Simulated Face Bounding Box & Target Label */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-52 h-64 border-2 border-emerald-400 rounded-2xl flex flex-col justify-between p-2 shadow-[0_0_20px_rgba(52,211,153,0.3)]">
-                  <div className="flex items-center justify-between text-[10px] bg-slate-900/90 text-emerald-300 px-2 py-1 rounded font-mono border border-emerald-500/30">
-                    <span>94% Confidence</span>
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  </div>
-                  <div className="bg-slate-900/90 text-white text-[11px] p-2 rounded border border-emerald-500/30 font-semibold text-center">
-                    Rahul Kumar (STU001)
-                  </div>
-                </div>
-              </div>
-
-              {completionNotice && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center bg-emerald-950/55 p-4 backdrop-blur-sm" role="status" aria-live="assertive">
-                  <div className="max-w-sm rounded-2xl border border-emerald-300/50 bg-emerald-500/15 p-5 text-center shadow-2xl shadow-emerald-950/70">
-                    <CheckCircle2 className="mx-auto mb-3 h-12 w-12 text-emerald-300" />
-                    <p className="text-lg font-bold text-white">{completionNotice.title}</p>
-                    <p className="mt-1 text-sm text-emerald-100">{completionNotice.message}</p>
-                    <span className="mt-3 inline-block rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-bold tracking-wide text-emerald-100">
-                      {completionNotice.action === 'CHECK_OUT' ? 'CHECK-OUT CONFIRMED' : 'CHECK-IN CONFIRMED'}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
+        <button className="rounded-xl border border-slate-700 px-4 py-2 flex gap-2" onClick={() => panel.current?.requestFullscreen?.().catch(() => {})}><Maximize size={18} />Full screen</button>
+      </header>
+      {(cameraError || serverError || (setup && !setup.ready)) && <div role="alert" className="bg-rose-950 border border-rose-600 rounded-xl p-4 flex gap-3"><AlertTriangle />{cameraError || serverError || setup.message}</div>}
+      {setup?.needs_enrollment > 0 && <p className="text-amber-300 text-sm">{setup.needs_enrollment} old face profile(s) need a new photo. <Link className="underline" to="/students">Open student directory</Link>.</p>}
+      <div className="grid lg:grid-cols-3 gap-5">
+        <section className="lg:col-span-2 space-y-3">
+          <div className="flex justify-between text-sm text-slate-400"><span>{cameraReady ? 'Camera connected' : 'Waiting for camera permission'}</span><span>{rate.toFixed(1)} scans/sec · {result?.faces?.length ?? 0} faces detected</span></div>
+          <div className="relative bg-black rounded-2xl overflow-hidden" style={{ aspectRatio: aspect }}>
+            <Webcam ref={webcam} audio={false} mirrored={false} screenshotFormat="image/jpeg" screenshotQuality={0.9}
+              videoConstraints={{ width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }}
+              onUserMedia={handleCamera} onUserMediaError={error => { setCameraReady(false); setCameraError(`Camera unavailable (${error.name || error}). Allow camera access in your browser and reload.`); }}
+              className="w-full h-full object-contain" />
+            {result?.faces?.map((face, index) => <div key={index} className={`absolute border-2 rounded-lg pointer-events-none ${confirmed ? 'border-emerald-400' : 'border-amber-300'}`}
+              style={{ left: `${100 * face.bbox[0] / result.width}%`, top: `${100 * face.bbox[1] / result.height}%`, width: `${100 * face.bbox[2] / result.width}%`, height: `${100 * face.bbox[3] / result.height}%` }}>
+              <span className="absolute bottom-0 left-0 bg-black/80 px-2 py-1 text-xs">{face.label}</span>
+            </div>)}
           </div>
-        </div>
-
-        {/* Right Column: Last Recognized Student Card */}
-        <div className="space-y-4">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h2 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Last Recognized Student</h2>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                Match Verified
-              </span>
-            </div>
-
-            {lastRecognizedStudent ? (
-              <div className="space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-xl bg-slate-800 border-2 border-cyan-500/50 overflow-hidden flex items-center justify-center text-cyan-400 font-bold text-xl shrink-0 shadow-lg">
-                    {lastRecognizedStudent.profile_photo_path ? (
-                      <img src={lastRecognizedStudent.profile_photo_path} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      lastRecognizedStudent.full_name?.charAt(0)
-                    )}
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-100">{lastRecognizedStudent.full_name}</h3>
-                    <p className="text-xs font-mono text-cyan-400">{lastRecognizedStudent.student_id}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">{lastRecognizedStudent.email}</p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl">
-                    <span className="text-[10px] text-slate-400 block">Time</span>
-                    <span className="text-xs font-semibold text-slate-200">{lastRecognizedStudent.timestamp}</span>
-                  </div>
-                  <div className="bg-slate-950/60 border border-slate-800 p-3 rounded-xl">
-                    <span className="text-[10px] text-slate-400 block">Confidence</span>
-                    <span className="text-xs font-mono font-bold text-emerald-400">
-                      {Math.round(lastRecognizedStudent.confidence * 100)}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300">
-                  <span className="font-semibold">Event Status:</span>
-                  <span className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 font-bold">
-                    {lastRecognizedStudent.action === 'CHECK_IN' ? 'CHECKED IN' : 'CHECKED OUT'}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400 text-center py-6">No recognition match yet.</p>
-            )}
+          <div role="status" aria-live="polite" className={`rounded-xl p-5 text-center text-xl font-semibold ${confirmed ? 'bg-emerald-900 text-emerald-100' : 'bg-slate-900 text-slate-300'}`}>
+            {confirmed && <CheckCircle2 className="inline mr-2" />}{cameraError ? 'Camera unavailable' : serverError ? 'Recognition unavailable — attendance has not been confirmed' : result?.message || 'Allow the camera to start scanning automatically'}
           </div>
-        </div>
+          <p className="text-xs text-slate-500">Keep this monitor open and the computer awake. Each student is marked present once per day; remaining in view does not check them out.</p>
+        </section>
+        <aside className="rounded-2xl border border-slate-800 bg-slate-900 p-5 space-y-4">
+          <h2 className="font-semibold text-slate-300">Last verified student</h2>
+          {!lastMatch ? <p className="text-slate-500">No verified face yet. Enrol a clear face photo from the student's profile.</p> : <>
+            <div className="grid grid-cols-2 gap-3">
+              <div><img src={lastMatch.student.profile_photo_path} alt="Enrolled profile" className="w-full aspect-square object-cover rounded-xl" /><p className="text-xs text-slate-400 mt-1">Profile photo</p></div>
+              <div><img src={lastMatch.captured} alt="Verified camera capture" className="w-full aspect-square object-cover rounded-xl" /><p className="text-xs text-slate-400 mt-1">Camera capture</p></div>
+            </div>
+            <Link to={`/students/${lastMatch.student.id}`} className="text-xl text-cyan-300 font-bold block">{lastMatch.student.full_name}</Link>
+            <p>{lastMatch.student.student_id}</p><p className="text-sm text-slate-400 break-all">{lastMatch.student.email}</p>
+            <p className="text-sm">{[lastMatch.student.department_name, lastMatch.student.course_name].filter(Boolean).join(' · ')}</p>
+            <p className="text-sm text-slate-400">Match similarity: {lastMatch.similarity.toFixed(3)}</p>
+            <p className="text-sm">Recorded at {new Date(lastMatch.timestamp).toLocaleString()}</p>
+            <div className="text-emerald-300 bg-emerald-900/40 p-3 rounded-lg">Attendance saved</div>
+          </>}
+        </aside>
       </div>
-
-      {/* Recent Live Recognition Events Feed */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
-        <h2 className="text-sm font-bold text-slate-200">Real-Time Attendance Event Feed</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950/60 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
-              <tr>
-                <th className="px-4 py-3">Student Name</th>
-                <th className="px-4 py-3">Student ID</th>
-                <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">Confidence</th>
-                <th className="px-4 py-3">Camera</th>
-                <th className="px-4 py-3">Event Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {recentEvents.map(event => (
-                <tr key={event.id} className="hover:bg-slate-800/40">
-                  <td className="px-4 py-3 font-semibold text-slate-200">{event.student?.full_name}</td>
-                  <td className="px-4 py-3 font-mono text-cyan-400">{event.student?.student_id}</td>
-                  <td className="px-4 py-3">{new Date(event.check_in_time).toLocaleTimeString()}</td>
-                  <td className="px-4 py-3 font-mono">{event.confidence ? `${Math.round(event.confidence * 100)}%` : 'Manual'}</td>
-                  <td className="px-4 py-3 text-slate-400">{event.camera_id || 'Entrance Cam 01'}</td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      {event.check_out_time ? 'CHECK_OUT' : 'CHECK_IN'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <section className="rounded-2xl bg-slate-900 p-5 overflow-auto">
+        <h2 className="font-semibold mb-3">Verified on this monitor</h2>
+        {!events.length ? <p className="text-slate-500 text-sm">Real matches will appear here.</p> : <table className="w-full text-sm text-left"><thead className="text-slate-400"><tr><th className="p-2">Student</th><th>ID</th><th>Attendance time</th><th>Result</th></tr></thead><tbody>
+          {events.map(event => <tr key={event.session_id} className="border-t border-slate-800"><td className="p-2">{event.student.full_name}</td><td>{event.student.student_id}</td><td>{new Date(event.timestamp).toLocaleTimeString()}</td><td className="text-emerald-400">{event.action === 'CHECK_IN' ? 'Attendance done' : 'Already recorded today'}</td></tr>)}
+        </tbody></table>}
+      </section>
     </div>
   );
 };

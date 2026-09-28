@@ -15,8 +15,8 @@ export const BookList = () => {
     isbn: '',
     title: '',
     publisher: '',
-    total_copies: 5,
-    shelf_location: 'Shelf A1',
+    total_copies: 1,
+    shelf_location: '',
     description: ''
   });
 
@@ -151,7 +151,7 @@ export const BookList = () => {
                     <td className="px-5 py-3.5">{b.publisher || '-'}</td>
                     <td className="px-5 py-3.5 font-semibold">{b.total_copies}</td>
                     <td className="px-5 py-3.5 font-bold text-emerald-400">{b.available_copies}</td>
-                    <td className="px-5 py-3.5">{b.shelf_location || 'Main Shelf'}</td>
+                    <td className="px-5 py-3.5">{b.shelf_location || '—'}</td>
                     <td className="px-5 py-3.5">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                         b.status === 'Available' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
@@ -188,7 +188,7 @@ export const BookList = () => {
                 <input
                   type="text"
                   required
-                  placeholder="978-0132350884"
+                  placeholder="Enter ISBN code"
                   value={newBook.isbn}
                   onChange={e => setNewBook({ ...newBook, isbn: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-100"
@@ -199,7 +199,7 @@ export const BookList = () => {
                 <input
                   type="text"
                   required
-                  placeholder="Clean Code"
+                  placeholder="Enter book title"
                   value={newBook.title}
                   onChange={e => setNewBook({ ...newBook, title: e.target.value })}
                   className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-100"
@@ -210,7 +210,7 @@ export const BookList = () => {
                   <label className="block text-xs text-slate-300 mb-1">Publisher</label>
                   <input
                     type="text"
-                    placeholder="Prentice Hall"
+                    placeholder="Enter publisher"
                     value={newBook.publisher}
                     onChange={e => setNewBook({ ...newBook, publisher: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-100"

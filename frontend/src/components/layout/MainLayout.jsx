@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useAuth } from '../../context/AuthContext';
+import { StudentNavigation } from './StudentNavigation';
+import { StudentHeader } from './StudentHeader';
 
 export const MainLayout = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   if (loading) {
@@ -23,12 +26,16 @@ export const MainLayout = () => {
     return <Navigate to="/login" replace />;
   }
 
+  const isStudent = user?.role === 'student';
+  if (isStudent && !location.pathname.startsWith('/student')) return <Navigate to="/student/dashboard" replace />;
+  if (!isStudent && location.pathname.startsWith('/student')) return <Navigate to="/dashboard" replace />;
+
   return (
     <div className="min-h-dvh bg-slate-950 text-slate-100 flex overflow-hidden">
-      <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+      {isStudent ? <StudentNavigation isOpen={sidebarOpen} setIsOpen={setSidebarOpen} /> : <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />}
       <div className="flex-1 md:ml-64 flex min-w-0 flex-col">
-        <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 md:p-6">
+        {isStudent ? <StudentHeader onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} /> : <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />}
+        <main className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 md:p-6 ${isStudent ? 'bg-gradient-to-br from-[#edf4fb] via-[#f8fafc] to-[#e7f0f8]' : ''}`}>
           <Outlet />
         </main>
       </div>

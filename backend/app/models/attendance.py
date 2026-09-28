@@ -9,8 +9,8 @@ class Camera(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     camera_code = Column(String(50), unique=True, index=True, nullable=False)
     name = Column(String(100), nullable=False)
-    location = Column(String(100), default="Main Entrance", nullable=False)
-    stream_url_or_index = Column(String(255), default="0", nullable=False)
+    location = Column(String(100), nullable=False)
+    stream_url_or_index = Column(String(255), nullable=False)
     status = Column(String(20), default="Active", nullable=False) # Active / Offline / Maintenance
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

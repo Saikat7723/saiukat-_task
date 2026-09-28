@@ -32,7 +32,7 @@ class AttendanceSessionResponse(BaseModel):
 class AttendanceEventCreate(BaseModel):
     student_id: int
     confidence: float
-    camera_id: str = "CAM-MAIN-ENTRANCE-01"
+    camera_id: str
     timestamp: Optional[datetime] = None
 
 class ManualAttendanceCreate(BaseModel):

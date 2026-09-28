@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { BookMarked, CheckCircle2, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { BookMarked, CheckCircle2, RotateCcw, AlertTriangle, RefreshCw } from 'lucide-react';
 import apiClient from '../api/axios';
+
+const localDateISO = (offsetDays = 0) => {
+  const value = new Date();
+  value.setDate(value.getDate() + offsetDays);
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return local.toISOString().split('T')[0];
+};
 
 export const IssueReturn = () => {
   const [students, setStudents] = useState([]);
@@ -10,30 +18,36 @@ export const IssueReturn = () => {
   // Issue Form State
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedBook, setSelectedBook] = useState('');
-  const [dueDate, setDueDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 14);
-    return d.toISOString().split('T')[0];
-  });
+  const [dueDate, setDueDate] = useState(() => localDateISO(14));
 
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [msg, setMsg] = useState(null);
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const [stuRes, bookRes, issueRes] = await Promise.all([
-        apiClient.get('/students?limit=200'),
+        apiClient.get('/students?status_filter=Active&limit=200'),
         apiClient.get('/books?limit=200'),
-        apiClient.get('/book-issues?status_filter=ISSUED')
+        apiClient.get('/book-issues?status_filter=ACTIVE')
       ]);
-      setStudents(stuRes.data);
-      setBooks(bookRes.data);
-      setActiveIssues(issueRes.data);
-      if (stuRes.data.length > 0) setSelectedStudent(stuRes.data[0].id);
-      if (bookRes.data.length > 0) setSelectedBook(bookRes.data[0].id);
+      const nextStudents = Array.isArray(stuRes.data) ? stuRes.data : [];
+      const nextBooks = Array.isArray(bookRes.data) ? bookRes.data : [];
+      const nextIssues = Array.isArray(issueRes.data) ? issueRes.data : [];
+      setStudents(nextStudents);
+      setBooks(nextBooks);
+      setActiveIssues(nextIssues);
+      setSelectedStudent(current => nextStudents.some(student => String(student.id) === String(current)) ? current : '');
+      setSelectedBook(current => nextBooks.some(book => String(book.id) === String(current) && book.available_copies > 0 && book.status !== 'Discontinued') ? current : '');
     } catch (e) {
-      console.error(e);
+      setStudents([]);
+      setBooks([]);
+      setActiveIssues([]);
+      setSelectedStudent('');
+      setSelectedBook('');
+      setLoadError(e.response?.data?.detail || 'Student, book and issue records could not be loaded.');
     } finally {
       setLoading(false);
     }
@@ -46,6 +60,10 @@ export const IssueReturn = () => {
   const handleIssueBook = async (e) => {
     e.preventDefault();
     setMsg(null);
+    if (!selectedStudent || !selectedBook) {
+      setMsg({ type: 'error', text: 'Select an active student and an available book first.' });
+      return;
+    }
     try {
       await apiClient.post('/book-issues', {
         student_id: parseInt(selectedStudent),
@@ -62,7 +80,7 @@ export const IssueReturn = () => {
   const handleReturnBook = async (issueId) => {
     try {
       await apiClient.post(`/book-issues/${issueId}/return`, {
-        return_date: new Date().toISOString().split('T')[0],
+        return_date: localDateISO(),
         fine_amount: 0.0
       });
       setMsg({ type: 'success', text: 'Book returned successfully!' });
@@ -74,12 +92,15 @@ export const IssueReturn = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-slate-900/60 border border-slate-800 p-6 rounded-2xl">
+      <div className="bg-slate-900/60 border border-slate-800 p-6 rounded-2xl flex items-start justify-between gap-4">
+        <div>
         <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
           <BookMarked className="w-5 h-5 text-cyan-400" />
           Book Issue & Return Station
         </h1>
         <p className="text-xs text-slate-400 mt-1">Check out books to registered students and process book returns</p>
+        </div>
+        <button type="button" onClick={fetchData} disabled={loading} className="shrink-0 rounded-xl border border-slate-700 p-2.5 text-slate-300 hover:border-cyan-500 hover:text-cyan-300 disabled:opacity-50" title="Refresh students, books and issue records" aria-label="Refresh issue and return data"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button>
       </div>
 
       {msg && (
@@ -90,6 +111,7 @@ export const IssueReturn = () => {
           <span>{msg.text}</span>
         </div>
       )}
+      {loadError && <div className="p-4 rounded-xl text-xs flex items-center gap-2.5 bg-rose-500/10 text-rose-300 border border-rose-500/30"><AlertTriangle className="w-4 h-4" /><span>{loadError}</span></div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Issue Book Form */}
@@ -99,29 +121,35 @@ export const IssueReturn = () => {
             <div>
               <label className="block text-xs text-slate-300 mb-1">Select Student *</label>
               <select
+                required
                 value={selectedStudent}
                 onChange={e => setSelectedStudent(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-100"
               >
+                <option value="">{loading ? 'Loading active students...' : students.length ? 'Select a student' : 'No active students available'}</option>
                 {students.map(s => (
                   <option key={s.id} value={s.id}>{s.full_name} ({s.student_id})</option>
                 ))}
               </select>
+              {!loading && students.length === 0 && <p className="mt-2 text-[11px] text-amber-300">No active student is registered. <Link className="underline" to="/students/new">Register a student</Link>.</p>}
             </div>
 
             <div>
               <label className="block text-xs text-slate-300 mb-1">Select Book *</label>
               <select
+                required
                 value={selectedBook}
                 onChange={e => setSelectedBook(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-100"
               >
-                {books.map(b => (
+                <option value="">{loading ? 'Loading available books...' : books.some(book => book.available_copies > 0 && book.status !== 'Discontinued') ? 'Select an available book' : 'No available books in catalogue'}</option>
+                {books.filter(book => book.status !== 'Discontinued').map(b => (
                   <option key={b.id} value={b.id} disabled={b.available_copies <= 0}>
                     {b.title} ({b.available_copies} available)
                   </option>
                 ))}
               </select>
+              {!loading && !books.some(book => book.available_copies > 0 && book.status !== 'Discontinued') && <p className="mt-2 text-[11px] text-amber-300">No available book is in the catalogue. <Link className="underline" to="/books">Add a book</Link>.</p>}
             </div>
 
             <div>
@@ -129,6 +157,7 @@ export const IssueReturn = () => {
               <input
                 type="date"
                 required
+                min={localDateISO()}
                 value={dueDate}
                 onChange={e => setDueDate(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-100"
@@ -137,7 +166,8 @@ export const IssueReturn = () => {
 
             <button
               type="submit"
-              className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg transition"
+              disabled={loading || !selectedStudent || !selectedBook}
+              className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg transition disabled:cursor-not-allowed disabled:opacity-50"
             >
               Issue Book
             </button>

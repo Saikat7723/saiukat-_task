@@ -10,6 +10,7 @@ class Student(Base):
     student_id = Column(String(50), unique=True, index=True, nullable=False) # Roll Number
     full_name = Column(String(120), nullable=False, index=True)
     email = Column(String(120), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
     department_id = Column(Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True)
     course_id = Column(Integer, ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
