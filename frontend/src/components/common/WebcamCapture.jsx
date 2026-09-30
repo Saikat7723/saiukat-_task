@@ -8,27 +8,37 @@ const videoConstraints = {
   facingMode: "user"
 };
 
-export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
+export const WebcamCapture = ({ onCaptureConfirmed, onCaptureCleared, isSubmitting, autoConfirm = false }) => {
   const webcamRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [capturedBlob, setCapturedBlob] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  const capture = useCallback(() => {
+  const capture = useCallback(async () => {
     const imageSrc = webcamRef.current?.getScreenshot();
     if (imageSrc) {
       setCapturedImage(imageSrc);
       setCapturedBlob(null);
       setErrorMsg(null);
+      if (autoConfirm) {
+        try {
+          const blob = await (await fetch(imageSrc)).blob();
+          setCapturedBlob(blob);
+          onCaptureConfirmed?.(blob, imageSrc);
+        } catch (error) {
+          setErrorMsg(`Could not process image snapshot: ${error.message}`);
+        }
+      }
     }
-  }, [webcamRef]);
+  }, [autoConfirm, onCaptureConfirmed]);
 
   const retake = () => {
     if (capturedBlob && capturedImage?.startsWith('blob:')) URL.revokeObjectURL(capturedImage);
     setCapturedImage(null);
     setCapturedBlob(null);
     setErrorMsg(null);
+    onCaptureCleared?.();
   };
 
   const handleFile = event => {
@@ -45,8 +55,10 @@ export const WebcamCapture = ({ onCaptureConfirmed, isSubmitting }) => {
       return;
     }
     setCapturedBlob(file);
-    setCapturedImage(URL.createObjectURL(file));
+    const previewUrl = URL.createObjectURL(file);
+    setCapturedImage(previewUrl);
     setErrorMsg(null);
+    if (autoConfirm) onCaptureConfirmed?.(file, previewUrl);
   };
 
   const confirmImage = () => {
