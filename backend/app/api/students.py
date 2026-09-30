@@ -11,6 +11,8 @@ from app.database.session import get_db
 from app.models.student import Student, StudentFaceProfile
 from app.models.academic import Department, Course
 from app.models.system import AuditLog
+from app.models.attendance import AttendanceEvent, AttendanceSession
+from app.models.book import BookIssue
 from app.schemas.student import StudentCreate, StudentUpdate, StudentResponse
 from app.core.security import get_current_user, Admin, get_password_hash
 from app.core.config import settings
@@ -249,13 +251,30 @@ def delete_student(id: int, db: Session = Depends(get_db), current_user: Admin =
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # Soft delete / set status to Inactive
-    student.status = "Inactive"
-    if student.face_profile:
-        student.face_profile.is_active = False
+    student_name = student.full_name
+    student_code = student.student_id
+    photo_path = student.profile_photo_path
 
-    db.add(student)
+    # Restore stock for books that are still checked out before removing their issue records.
+    for issue in db.query(BookIssue).filter(BookIssue.student_id == student.id).all():
+        if issue.return_date is None and issue.status in {"ISSUED", "OVERDUE"} and issue.book:
+            issue.book.available_copies = min(issue.book.total_copies, issue.book.available_copies + 1)
+
+    # Delete all data owned by the student. This is intentionally permanent.
+    db.query(AttendanceEvent).filter(AttendanceEvent.student_id == student.id).delete(synchronize_session=False)
+    db.query(AttendanceSession).filter(AttendanceSession.student_id == student.id).delete(synchronize_session=False)
+    db.query(BookIssue).filter(BookIssue.student_id == student.id).delete(synchronize_session=False)
+    db.delete(student)
     db.commit()
+
+    if photo_path:
+        filename = os.path.basename(photo_path)
+        filepath = os.path.join(settings.PROFILES_DIR, filename)
+        if os.path.isfile(filepath):
+            try:
+                os.remove(filepath)
+            except OSError:
+                logger.warning("Could not remove deleted student profile image: %s", filepath)
 
     audit = AuditLog(
         admin_id=current_user.id,
@@ -263,12 +282,12 @@ def delete_student(id: int, db: Session = Depends(get_db), current_user: Admin =
         action="STUDENT_DEACTIVATE",
         target_type="Student",
         target_id=str(student.id),
-        details=f"Deactivated student {student.full_name}"
+        details=f"Permanently deleted student {student_name} ({student_code})"
     )
     db.add(audit)
     db.commit()
 
-    return {"success": True, "message": f"Student {student.full_name} deactivated successfully"}
+    return {"success": True, "message": f"Student {student_name} deleted permanently"}
 
 @router.post("/{id}/photo", response_model=StudentResponse)
 def upload_student_photo(

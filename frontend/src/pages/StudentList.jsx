@@ -255,15 +255,13 @@ export const StudentList = () => {
                         >
                           <Edit className="w-4 h-4" />
                         </Link>
-                        {student.status === 'Active' && (
-                          <button
-                            onClick={() => setStudentToDeactivate(student)}
-                            title="Delete student"
-                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => setStudentToDeactivate(student)}
+                          title="Delete student permanently"
+                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -274,7 +272,7 @@ export const StudentList = () => {
         </div>
       </div>
       {!loading && totalStudents > 0 && <div className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between"><span>Showing {(page - 1) * rowsPerPage + 1} to {Math.min(page * rowsPerPage, totalStudents)} of {totalStudents} students</span><div className="flex items-center gap-2"><label>Rows per page <select value={rowsPerPage} onChange={event => { setRowsPerPage(Number(event.target.value)); setPage(1); }} className="ml-1 rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1 text-slate-200"><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label><button type="button" onClick={() => setPage(current => Math.max(1, current - 1))} disabled={page === 1} className="rounded-lg border border-slate-700 px-2 py-1 text-slate-300 disabled:opacity-40">Previous</button><span className="rounded-lg bg-blue-600 px-2 py-1 font-semibold text-white">{page}</span><button type="button" onClick={() => setPage(current => current + 1)} disabled={page * rowsPerPage >= totalStudents} className="rounded-lg border border-slate-700 px-2 py-1 text-slate-300 disabled:opacity-40">Next</button></div></div>}
-      {studentToDeactivate && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" aria-labelledby="delete-student-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"><div className="flex items-start gap-3"><span className="rounded-full bg-rose-100 p-3 text-rose-600"><Trash2 className="h-5 w-5" /></span><div><h2 id="delete-student-title" className="text-lg font-bold text-slate-900">Delete Student?</h2><p className="mt-2 text-sm leading-6 text-slate-600">Deactivate <strong>{studentToDeactivate.full_name}</strong>? Their attendance and library history will be kept safely, but they will no longer be able to sign in or use face attendance.</p></div></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setStudentToDeactivate(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button><button type="button" onClick={handleDeactivate} className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">Delete Student</button></div></div></div>}
+      {studentToDeactivate && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div role="dialog" aria-modal="true" aria-labelledby="delete-student-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"><div className="flex items-start gap-3"><span className="rounded-full bg-rose-100 p-3 text-rose-600"><Trash2 className="h-5 w-5" /></span><div><h2 id="delete-student-title" className="text-lg font-bold text-slate-900">Delete Student Permanently?</h2><p className="mt-2 text-sm leading-6 text-slate-600">Delete <strong>{studentToDeactivate.full_name}</strong> and all associated attendance, face profile, and library issue records? This cannot be undone.</p></div></div><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setStudentToDeactivate(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button><button type="button" onClick={handleDeactivate} className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">Delete Permanently</button></div></div></div>}
     </div>
   );
 };
