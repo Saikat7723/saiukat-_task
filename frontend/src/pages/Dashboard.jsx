@@ -1,321 +1,57 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Users,
-  UserCheck,
-  UserX,
-  Building,
-  Percent,
-  BookOpen,
-  BookCheck,
-  BookMarked,
-  Clock,
-  ArrowUpRight,
-  Search,
-  Filter,
-  RefreshCw
-} from 'lucide-react';
-import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell
-} from 'recharts';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { BookOpen, CalendarDays, Clock3, FileBarChart, Library, RefreshCw, UserCheck, Users } from 'lucide-react';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import apiClient from '../api/axios';
 
-const PIE_COLORS = ['#38bdf8', '#34d399', '#f87171', '#fbbf24', '#a78bfa'];
+const asDate = value => value && new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`);
+const time = value => value ? asDate(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+const day = value => value ? new Date(`${value}T00:00:00`).toLocaleDateString([], { day: '2-digit', month: 'short' }) : '—';
+const Empty = ({ children }) => <p className="py-10 text-center text-sm text-slate-500">{children}</p>;
+const Card = ({ children, className = '' }) => <section className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}>{children}</section>;
+const Metric = ({ title, value, detail, icon: Icon, tone }) => <Card><div className="flex gap-4"><span className={`rounded-2xl p-3 ${tone}`}><Icon size={25} /></span><div><p className="text-sm text-slate-500">{title}</p><p className="mt-1 text-3xl font-bold text-slate-900">{value}</p><p className="mt-2 text-xs text-slate-500">{detail}</p></div></div></Card>;
 
 export const Dashboard = () => {
   const [summary, setSummary] = useState(null);
-  const [attendanceChart, setAttendanceChart] = useState([]);
-  const [librarySummary, setLibrarySummary] = useState(null);
-  const [recentAttendance, setRecentAttendance] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [library, setLibrary] = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [issues, setIssues] = useState([]);
+  const [audits, setAudits] = useState([]);
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const load = async () => {
+    setLoading(true); setError('');
     try {
-      const [sumRes, chartRes, libRes, recentRes] = await Promise.all([
-        apiClient.get('/dashboard/summary'),
-        apiClient.get('/dashboard/attendance-chart?days=7'),
-        apiClient.get('/dashboard/library-summary'),
-        apiClient.get('/attendance?limit=10')
+      const [summaryResponse, libraryResponse, attendanceResponse, issueResponse, auditResponse] = await Promise.all([
+        apiClient.get('/dashboard/summary'), apiClient.get('/dashboard/library-summary'), apiClient.get('/attendance?limit=8'), apiClient.get('/book-issues?limit=8'), apiClient.get('/admin/audit-logs?limit=8')
       ]);
-      setSummary(sumRes.data);
-      setAttendanceChart(chartRes.data.daily || []);
-      setLibrarySummary(libRes.data);
-      setRecentAttendance(recentRes.data);
-    } catch (err) {
-      console.error('Failed to load dashboard metrics', err);
-    } finally {
-      setLoading(false);
-    }
+      setSummary(summaryResponse.data); setLibrary(libraryResponse.data); setAttendance(attendanceResponse.data); setIssues(issueResponse.data); setAudits(auditResponse.data);
+    } catch (requestError) { setError(requestError.response?.data?.detail || 'Dashboard data could not be loaded.'); }
+    finally { setLoading(false); }
   };
+  useEffect(() => { load(); }, []);
+  const attendanceMatches = useMemo(() => attendance.filter(session => `${session.student?.full_name || ''} ${session.student?.student_id || ''}`.toLowerCase().includes(search.toLowerCase())), [attendance, search]);
+  const attendanceData = [{ name: 'Present', value: summary?.present_today || 0 }, { name: 'Absent', value: summary?.absent_today || 0 }];
+  const libraryData = [{ name: 'Available', value: library?.available || 0 }, { name: 'Issued', value: library?.issued || 0 }, { name: 'Overdue', value: library?.overdue || 0 }];
+  const dateLabel = new Date().toLocaleDateString([], { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' });
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const Donut = ({ values, colours, empty }) => values.some(item => item.value) ? <div className="h-48 w-1/2"><ResponsiveContainer><PieChart><Pie data={values} dataKey="value" innerRadius={52} outerRadius={76} paddingAngle={3}>{colours.map(colour => <Cell key={colour} fill={colour} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer></div> : <div className="flex h-48 w-1/2 items-center justify-center text-center text-sm text-slate-500">{empty}</div>;
 
-  const filteredRecent = recentAttendance.filter(item =>
-    item.student?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-    item.student?.student_id?.toLowerCase().includes(search.toLowerCase())
-  );
-  const hasAttendanceData = attendanceChart.some(point => point.present > 0 || point.absent > 0);
-  const hasLibraryData = [librarySummary?.available, librarySummary?.issued, librarySummary?.overdue].some(value => Number(value) > 0);
-
-  return (
-    <div className="space-y-6">
-      {/* Top Welcome Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-slate-800 p-6 rounded-2xl">
-        <div>
-          <h1 className="text-xl font-bold text-slate-100">Library & Attendance Analytics</h1>
-          <p className="text-xs text-slate-400 mt-1">Real-time Library Entry/Exit Attendance & Book Circulation Overview</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={fetchDashboardData}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition flex items-center gap-2"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh Metrics
-          </button>
-        </div>
-      </div>
-
-      {/* Metric Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {/* Total Students */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Total Students</span>
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center">
-              <Users className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-slate-100">{summary?.total_students || 0}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">{summary?.active_students || 0} Active Enrolled</span>
-          </div>
-        </div>
-
-        {/* Present Today */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Present Today</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-              <UserCheck className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-emerald-400">{summary?.present_today || 0}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">{summary?.today_attendance_percentage || 0}% Attendance</span>
-          </div>
-        </div>
-
-        {/* Currently Inside Library */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Currently Inside</span>
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-              <Building className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-indigo-400">{summary?.currently_inside || 0}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">Active Library Sessions</span>
-          </div>
-        </div>
-
-        {/* Available Books */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Available Books</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center">
-              <BookCheck className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-slate-100">{summary?.available_books || 0}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">Of {summary?.total_books || 0} Total Copies</span>
-          </div>
-        </div>
-
-        {/* Overdue Books */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-400">Overdue Books</span>
-            <div className="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <span className="text-2xl font-bold text-rose-400">{summary?.overdue_books || 0}</span>
-            <span className="text-[10px] text-slate-400 block mt-0.5">Pending Fine Calculation</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Attendance Trend Chart */}
-        <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-sm font-bold text-slate-200">Daily Attendance Trend</h2>
-              <p className="text-[11px] text-slate-400">Student check-in count over past 7 days</p>
-            </div>
-            <span className="text-xs font-semibold px-2.5 py-1 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-              Weekly Trend
-            </span>
-          </div>
-          <div className="h-64">
-            {!hasAttendanceData ? <div className="h-full flex items-center justify-center text-sm text-slate-500">No attendance records have been recorded yet.</div> : <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={attendanceChart}>
-                <defs>
-                  <linearGradient id="attendanceGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#0284c7" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
-                <YAxis stroke="#64748b" fontSize={11} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
-                />
-                <Area type="monotone" dataKey="present" stroke="#38bdf8" strokeWidth={2} fillOpacity={1} fill="url(#attendanceGradient)" />
-              </AreaChart>
-            </ResponsiveContainer>}
-          </div>
-        </div>
-
-        {/* Library Book Circulation Summary */}
-        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5">
-          <h2 className="text-sm font-bold text-slate-200 mb-1">Library Stock Breakdown</h2>
-          <p className="text-[11px] text-slate-400 mb-4">Available vs Issued vs Overdue Books</p>
-          <div className="h-52 flex items-center justify-center">
-            {!hasLibraryData ? <p className="text-sm text-slate-500 text-center">No books have been added to the catalogue yet.</p> : <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={[
-                    { name: 'Available', value: librarySummary?.available || 0 },
-                    { name: 'Issued', value: librarySummary?.issued || 0 },
-                    { name: 'Overdue', value: librarySummary?.overdue || 0 }
-                  ]}
-                  innerRadius={50}
-                  outerRadius={75}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  <Cell fill="#34d399" />
-                  <Cell fill="#38bdf8" />
-                  <Cell fill="#f87171" />
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }} />
-              </PieChart>
-            </ResponsiveContainer>}
-          </div>
-          {hasLibraryData && <div className="flex items-center justify-center gap-4 text-xs mt-2">
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span> Available</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> Issued</div>
-            <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-rose-400"></span> Overdue</div>
-          </div>}
-        </div>
-      </div>
-
-      {/* Recent Attendance Session Activity Table */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-bold text-slate-200">Recent Attendance Sessions</h2>
-            <p className="text-[11px] text-slate-400">Live attendance check-in & check-out logs</p>
-          </div>
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search by student name or ID..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 pr-4 py-1.5 bg-slate-950/60 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-cyan-500 w-64"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950/60 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
-              <tr>
-                <th className="px-4 py-3">Student</th>
-                <th className="px-4 py-3">Student ID</th>
-                <th className="px-4 py-3">Check-In Time</th>
-                <th className="px-4 py-3">Check-Out Time</th>
-                <th className="px-4 py-3">Duration</th>
-                <th className="px-4 py-3">Confidence</th>
-                <th className="px-4 py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {filteredRecent.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-6 text-slate-400">
-                    No attendance sessions found.
-                  </td>
-                </tr>
-              ) : (
-                filteredRecent.map((sess) => (
-                  <tr key={sess.id} className="hover:bg-slate-800/40 transition">
-                    <td className="px-4 py-3 flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center text-cyan-400 font-bold shrink-0">
-                        {sess.student?.profile_photo_path ? (
-                          <img src={sess.student.profile_photo_path} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          sess.student?.full_name?.charAt(0) || 'S'
-                        )}
-                      </div>
-                      <span className="font-semibold text-slate-200">{sess.student?.full_name}</span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-cyan-400">{sess.student?.student_id}</td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {new Date(sess.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {sess.check_out_time ? (
-                        new Date(sess.check_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      ) : (
-                        <span className="text-amber-400 font-medium">Inside Library</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {sess.duration_minutes > 0 ? `${sess.duration_minutes} mins` : '-'}
-                    </td>
-                    <td className="px-4 py-3 font-mono">
-                      {sess.confidence ? `${Math.round(sess.confidence * 100)}%` : 'Manual'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                        sess.status === 'Present' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        sess.status === 'Late' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                        'bg-slate-800 text-slate-300'
-                      }`}>
-                        {sess.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+  return <div className="mx-auto max-w-[1600px] space-y-5 text-slate-900">
+    <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><div><h1 className="text-3xl font-bold">Dashboard</h1><p className="mt-1 text-slate-500">Live overview of library operations and verified attendance.</p></div><div className="flex items-center gap-3"><span className="hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 sm:block"><CalendarDays className="mr-2 inline text-blue-600" size={18} />{dateLabel}</span><button type="button" onClick={load} className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} />Refresh</button></div></header>
+    {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</p>}
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric title="Total Students" value={summary?.total_students ?? '—'} detail={`${summary?.active_students ?? 0} active registered students`} icon={Users} tone="bg-violet-100 text-violet-600" /><Metric title="Present Today" value={summary?.present_today ?? '—'} detail={`${summary?.today_attendance_percentage ?? 0}% of active students`} icon={UserCheck} tone="bg-emerald-100 text-emerald-600" /><Metric title="Total Books" value={summary?.total_books ?? '—'} detail={`${summary?.available_books ?? 0} copies currently available`} icon={BookOpen} tone="bg-rose-100 text-rose-500" /><Metric title="Books Issued" value={summary?.issued_books ?? '—'} detail={`${summary?.overdue_books ?? 0} overdue items need attention`} icon={Library} tone="bg-amber-100 text-amber-600" /></div>
+    <div className="grid gap-5 xl:grid-cols-[1fr_1fr_0.8fr]">
+      <Card><div className="mb-3 flex justify-between"><h2 className="font-bold">Today&apos;s Attendance</h2><Link to="/attendance/list" className="text-xs font-semibold text-blue-600">View log</Link></div><div className="flex items-center gap-4"><Donut values={attendanceData} colours={['#22c55e', '#f87171']} empty="No attendance records for today." /><div className="space-y-4 text-sm"><p><i className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-500" />Present <b className="ml-5">{summary?.present_today ?? 0}</b></p><p><i className="mr-2 inline-block h-3 w-3 rounded-full bg-red-400" />Absent <b className="ml-6">{summary?.absent_today ?? 0}</b></p><p><i className="mr-2 inline-block h-3 w-3 rounded-full bg-slate-300" />Inside <b className="ml-6">{summary?.currently_inside ?? 0}</b></p></div></div></Card>
+      <Card><div className="mb-3 flex justify-between"><h2 className="font-bold">Library Status</h2><Link to="/books" className="text-xs font-semibold text-blue-600">Manage books</Link></div><div className="flex items-center gap-4"><Donut values={libraryData} colours={['#2563eb', '#f59e0b', '#ef4444']} empty="No catalogue data yet." /><div className="space-y-4 text-sm"><p><i className="mr-2 inline-block h-3 w-3 rounded-full bg-blue-600" />Available <b className="ml-3">{library?.available ?? 0}</b></p><p><i className="mr-2 inline-block h-3 w-3 rounded-full bg-amber-500" />Issued <b className="ml-8">{library?.issued ?? 0}</b></p><p><i className="mr-2 inline-block h-3 w-3 rounded-full bg-red-500" />Overdue <b className="ml-5">{library?.overdue ?? 0}</b></p></div></div></Card>
+      <Card><h2 className="mb-4 font-bold">Quick Actions</h2><div className="grid grid-cols-2 gap-3"><Link to="/books" className="rounded-xl bg-blue-50 p-3 text-center text-xs font-semibold text-blue-700 hover:bg-blue-100"><BookOpen className="mx-auto mb-1" size={20} />Manage books</Link><Link to="/attendance/live" className="rounded-xl bg-emerald-50 p-3 text-center text-xs font-semibold text-emerald-700 hover:bg-emerald-100"><UserCheck className="mx-auto mb-1" size={20} />Live attendance</Link><Link to="/books/issue-return" className="rounded-xl bg-amber-50 p-3 text-center text-xs font-semibold text-amber-700 hover:bg-amber-100"><BookOpen className="mx-auto mb-1" size={20} />Issue / return</Link><Link to="/attendance/reports" className="rounded-xl bg-violet-50 p-3 text-center text-xs font-semibold text-violet-700 hover:bg-violet-100"><FileBarChart className="mx-auto mb-1" size={20} />Reports</Link></div></Card>
     </div>
-  );
+    <div className="grid gap-5 xl:grid-cols-[1.1fr_1.1fr_0.8fr]">
+      <Card className="overflow-hidden"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold">Recent Attendance</h2><p className="text-xs text-slate-500">Verified check-in and check-out sessions</p></div><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search student or ID" className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-blue-500" /></div>{attendanceMatches.length ? <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="border-y border-slate-100 bg-slate-50 text-slate-500"><tr><th className="p-3">Student</th><th className="p-3">Check in</th><th className="p-3">Check out</th><th className="p-3">Status</th></tr></thead><tbody>{attendanceMatches.map(session => <tr key={session.id} className="border-b border-slate-100"><td className="p-3"><div className="flex items-center gap-2">{session.student?.profile_photo_path ? <img src={session.student.profile_photo_path} alt="" className="h-7 w-7 rounded-full object-cover" /> : <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 font-bold">{session.student?.full_name?.[0] || 'S'}</span>}<div><p className="font-semibold text-slate-800">{session.student?.full_name}</p><p className="font-mono text-blue-600">{session.student?.student_id}</p></div></div></td><td className="p-3">{time(session.check_in_time)}</td><td className="p-3">{session.check_out_time ? time(session.check_out_time) : <span className="font-semibold text-amber-600">Inside library</span>}</td><td className="p-3"><span className="rounded-full bg-emerald-100 px-2 py-1 font-semibold text-emerald-700">{session.status}</span></td></tr>)}</tbody></table></div> : <Empty>{search ? 'No matching attendance session.' : 'No recorded activity yet.'}</Empty>}</Card>
+      <Card><div className="mb-4 flex justify-between"><div><h2 className="font-bold">Recent Book Activity</h2><p className="text-xs text-slate-500">Issues and returns from the library</p></div><Link to="/books/issue-return" className="text-xs font-semibold text-blue-600">View all</Link></div>{issues.length ? <div className="space-y-2">{issues.slice(0, 5).map(issue => <div key={issue.id} className="grid grid-cols-[1.1fr_1.3fr_auto] items-center gap-2 rounded-xl bg-slate-50 px-3 py-3 text-xs"><div><p className="font-semibold text-slate-800">{issue.student_name || 'Student'}</p><p className="font-mono text-blue-600">{issue.student_code || '—'}</p></div><div><p className="font-medium text-slate-700">{issue.book?.title || 'Book'}</p><p className="text-slate-500">{day(issue.return_date || issue.issue_date)}</p></div><span className={`rounded-full px-2 py-1 font-semibold ${issue.status === 'RETURNED' ? 'bg-blue-100 text-blue-700' : issue.status === 'OVERDUE' ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>{issue.status}</span></div>)}</div> : <Empty>No recorded activity yet.</Empty>}</Card>
+      <Card><div className="mb-4 flex justify-between"><h2 className="font-bold">System Activity</h2><Link to="/admin/settings" className="text-xs font-semibold text-blue-600">Settings</Link></div>{audits.length ? <div className="space-y-4">{audits.slice(0, 6).map(log => <div key={log.id} className="flex gap-3"><span className="mt-1 rounded-full bg-blue-100 p-2 text-blue-600"><Clock3 size={14} /></span><div><p className="text-sm font-semibold text-slate-800">{log.action.replaceAll('_', ' ')}</p><p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{log.details || 'Administrator activity recorded.'}</p><p className="mt-1 text-xs text-slate-400">{time(log.timestamp)}</p></div></div>)}</div> : <Empty>No recorded activity yet.</Empty>}</Card>
+    </div>
+  </div>;
 };

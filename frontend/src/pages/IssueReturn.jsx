@@ -29,7 +29,7 @@ export const IssueReturn = () => {
     setLoadError('');
     try {
       const [stuRes, bookRes, issueRes] = await Promise.all([
-        apiClient.get('/students?status_filter=Active&limit=200'),
+        apiClient.get('/book-issues/eligible-students'),
         apiClient.get('/books?limit=200'),
         apiClient.get('/book-issues?status_filter=ACTIVE')
       ]);
@@ -131,7 +131,7 @@ export const IssueReturn = () => {
                   <option key={s.id} value={s.id}>{s.full_name} ({s.student_id})</option>
                 ))}
               </select>
-              {!loading && students.length === 0 && <p className="mt-2 text-[11px] text-amber-300">No active student is registered. <Link className="underline" to="/students/new">Register a student</Link>.</p>}
+              {!loading && students.length === 0 && <p className="mt-2 text-[11px] text-amber-300">No active students are currently available for book issue.</p>}
             </div>
 
             <div>

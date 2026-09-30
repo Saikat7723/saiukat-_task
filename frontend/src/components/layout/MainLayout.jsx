@@ -31,11 +31,11 @@ export const MainLayout = () => {
   if (!isStudent && location.pathname.startsWith('/student')) return <Navigate to="/dashboard" replace />;
 
   return (
-    <div className="min-h-dvh bg-slate-950 text-slate-100 flex overflow-hidden">
+    <div className={`min-h-dvh flex overflow-hidden ${isStudent ? 'bg-slate-950 text-slate-100' : 'admin-shell text-slate-900'}`}>
       {isStudent ? <StudentNavigation isOpen={sidebarOpen} setIsOpen={setSidebarOpen} /> : <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />}
       <div className="flex-1 md:ml-64 flex min-w-0 flex-col">
         {isStudent ? <StudentHeader onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} /> : <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />}
-        <main className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 md:p-6 ${isStudent ? 'bg-gradient-to-br from-[#edf4fb] via-[#f8fafc] to-[#e7f0f8]' : ''}`}>
+        <main className={`min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 md:p-6 ${isStudent ? 'bg-gradient-to-br from-[#edf4fb] via-[#f8fafc] to-[#e7f0f8]' : 'admin-workspace bg-gradient-to-br from-[#edf4fb] via-[#f8fbff] to-[#eaf3fb]'}`}>
           <Outlet />
         </main>
       </div>

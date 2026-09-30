@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Save, UserPlus } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Save, UserPlus } from 'lucide-react';
 import apiClient from '../api/axios';
 import { WebcamCapture } from '../components/common/WebcamCapture';
 
@@ -9,7 +9,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 const emptyForm = () => ({
   student_id: '', full_name: '', email: '', password: '', phone: '',
   department_id: '', course_id: '', dob: '', gender: '',
-  date_of_joining: today(), address: '', status: 'Active',
+  date_of_joining: today(), semester: '', enrollment_year: String(new Date().getFullYear()),
+  address: '', emergency_phone: '', remarks: '', library_member: true, status: 'Active',
 });
 
 const toFormData = student => ({
@@ -23,7 +24,12 @@ const toFormData = student => ({
   dob: student.dob || '',
   gender: student.gender || '',
   date_of_joining: student.date_of_joining || '',
+  semester: student.semester || '',
+  enrollment_year: student.enrollment_year ? String(student.enrollment_year) : '',
   address: student.address || '',
+  emergency_phone: student.emergency_phone || '',
+  remarks: student.remarks || '',
+  library_member: student.library_member !== false,
   status: student.status || 'Active',
 });
 
@@ -40,6 +46,7 @@ export const StudentAdd = () => {
   const [loading, setLoading] = useState(editing);
   const [academicLoading, setAcademicLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [academicError, setAcademicError] = useState('');
 
@@ -51,13 +58,9 @@ export const StudentAdd = () => {
       setAcademicLoading(true);
       setAcademicError('');
       try {
-        const [departmentResponse, courseResponse] = await Promise.all([
-          apiClient.get('/admin/departments'),
-          apiClient.get('/admin/courses'),
-        ]);
+        const departmentResponse = await apiClient.get('/admin/departments');
         if (!mounted) return;
         setDepartments(Array.isArray(departmentResponse.data) ? departmentResponse.data : []);
-        setCourses(Array.isArray(courseResponse.data) ? courseResponse.data : []);
       } catch (error) {
         if (mounted) setAcademicError(error.response?.data?.detail || 'Academic options could not be loaded. You can save the student without them.');
       } finally {
@@ -67,6 +70,29 @@ export const StudentAdd = () => {
     loadAcademic();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (!selectedDepartment) {
+      setCourses([]);
+      return undefined;
+    }
+    let mounted = true;
+    apiClient.get(`/admin/courses?department_id=${encodeURIComponent(selectedDepartment)}`)
+      .then(response => { if (mounted) setCourses(Array.isArray(response.data) ? response.data : []); })
+      .catch(error => { if (mounted) setAcademicError(error.response?.data?.detail || 'Courses could not be loaded.'); });
+    return () => { mounted = false; };
+  }, [selectedDepartment]);
+
+  useEffect(() => {
+    if (editing) return undefined;
+    let mounted = true;
+    apiClient.get('/students/next-id')
+      .then(response => {
+        if (mounted) setFormData(previous => ({ ...previous, student_id: response.data.student_id || '' }));
+      })
+      .catch(error => { if (mounted) setErrorMsg(error.response?.data?.detail || 'The next student ID could not be generated.'); });
+    return () => { mounted = false; };
+  }, [editing]);
 
   useEffect(() => {
     if (!editing) return undefined;
@@ -88,7 +114,11 @@ export const StudentAdd = () => {
   }, [editing, id]);
 
   const updateField = (field, value) => {
-    setFormData(previous => ({ ...previous, [field]: value }));
+    setFormData(previous => ({
+      ...previous,
+      [field]: value,
+      ...(field === 'department_id' ? { course_id: '' } : {}),
+    }));
     setErrorMsg('');
   };
 
@@ -105,8 +135,10 @@ export const StudentAdd = () => {
       date_of_joining: formData.date_of_joining || null,
       department_id: formData.department_id ? Number(formData.department_id) : null,
       course_id: formData.course_id ? Number(formData.course_id) : null,
+      enrollment_year: formData.enrollment_year ? Number(formData.enrollment_year) : null,
     };
     if (editing) delete payload.password;
+    else delete payload.student_id;
     return payload;
   };
 
@@ -141,8 +173,8 @@ export const StudentAdd = () => {
       }
 
       if (confirmedPhotoBlob) await uploadPhoto(savedStudent);
-      navigate(`/students/${savedStudent.id}`, {
-        state: { message: confirmedPhotoBlob ? 'Student saved and face profile enrolled.' : 'Student saved. Enrol a face photo from this profile before using automatic attendance.' },
+      navigate('/admin/students', {
+        state: { message: confirmedPhotoBlob ? 'Student added successfully and face profile enrolled.' : 'Student added successfully. Enrol a face photo from the student profile before using automatic attendance.' },
       });
     } catch (error) {
       const detail = error.response?.data?.detail || 'The student could not be saved. Check the fields and try again.';
@@ -159,7 +191,7 @@ export const StudentAdd = () => {
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <button type="button" onClick={() => navigate('/students')} className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"><ArrowLeft className="w-4 h-4" /> Back to Student Directory</button>
+        <button type="button" onClick={() => navigate('/admin/students')} className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"><ArrowLeft className="w-4 h-4" /> Back to Students</button>
         <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">{editing ? <Save className="w-5 h-5 text-cyan-400" /> : <UserPlus className="w-5 h-5 text-cyan-400" />}{editing ? 'Edit Student' : 'Register Student'}</h1>
       </div>
 
@@ -170,15 +202,18 @@ export const StudentAdd = () => {
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2"><h2 className="text-sm font-bold text-slate-200">Personal &amp; Academic Information</h2>{academicLoading && <span className="text-[11px] text-slate-500">Loading options…</span>}</div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Student ID / Roll No *"><input required value={formData.student_id} onChange={e => updateField('student_id', e.target.value)} placeholder="Enter roll number" className="form-input" /></Field><Field label="Full Name *"><input required value={formData.full_name} onChange={e => updateField('full_name', e.target.value)} placeholder="Enter full name" className="form-input" /></Field></div>
-          {!editing && !createdStudent && <Field label="Student portal password *"><input required minLength={8} type="password" value={formData.password} onChange={e => updateField('password', e.target.value)} placeholder="At least 8 characters" className="form-input" /><small className="form-help">The student will use the roll number or email with this password.</small></Field>}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Student ID / Roll No"><input value={formData.student_id || 'Generating…'} readOnly={!editing} onChange={e => updateField('student_id', e.target.value)} className={`form-input font-mono ${editing ? '' : 'bg-slate-950/40 text-cyan-300'}`} /><small className="form-help">{editing ? 'Only administrators can change this unique roll number.' : 'Generated automatically by the system.'}</small></Field><Field label="Full Name *"><input required value={formData.full_name} onChange={e => updateField('full_name', e.target.value)} placeholder="Enter full name" className="form-input" /></Field></div>
+          {!editing && !createdStudent && <Field label="Student portal password *"><div className="relative"><input required minLength={8} type={showPassword ? 'text' : 'password'} value={formData.password} onChange={e => updateField('password', e.target.value)} placeholder="At least 8 characters" className="form-input pr-11" /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-cyan-300">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div><small className="form-help">The student will use the roll number or email with this password.</small></Field>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Email Address *"><input required type="email" value={formData.email} onChange={e => updateField('email', e.target.value)} placeholder="Enter student email" className="form-input" /></Field><Field label="Phone Number"><input value={formData.phone} onChange={e => updateField('phone', e.target.value)} placeholder="Enter phone number" className="form-input" /></Field></div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Department"><select value={formData.department_id} onChange={e => updateField('department_id', e.target.value)} className="form-input"><option value="">No department selected</option>{departments.map(department => <option key={department.id} value={department.id}>{department.name} ({department.code})</option>)}</select></Field><Field label="Course"><select value={formData.course_id} onChange={e => updateField('course_id', e.target.value)} className="form-input"><option value="">No course selected</option>{courses.filter(course => !selectedDepartment || String(course.department_id) === String(selectedDepartment)).map(course => <option key={course.id} value={course.id}>{course.name} ({course.code})</option>)}</select></Field></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Department"><select value={formData.department_id} onChange={e => updateField('department_id', e.target.value)} className="form-input"><option value="">No department selected</option>{departments.map(department => <option key={department.id} value={department.id}>{department.name} ({department.code})</option>)}</select></Field><Field label="Course"><select value={formData.course_id} onChange={e => updateField('course_id', e.target.value)} disabled={!selectedDepartment} className="form-input disabled:opacity-60"><option value="">{selectedDepartment ? 'No course selected' : 'Select a department first'}</option>{courses.map(course => <option key={course.id} value={course.id}>{course.name} ({course.code})</option>)}</select></Field></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Date of Birth"><input type="date" value={formData.dob} onChange={e => updateField('dob', e.target.value)} className="form-input" /></Field><Field label="Date of Joining"><input type="date" value={formData.date_of_joining} onChange={e => updateField('date_of_joining', e.target.value)} className="form-input" /></Field></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Semester / Year"><input value={formData.semester} onChange={e => updateField('semester', e.target.value)} placeholder="e.g. Semester 3" className="form-input" /></Field><Field label="Enrollment Year"><select value={formData.enrollment_year} onChange={e => updateField('enrollment_year', e.target.value)} className="form-input"><option value="">Select enrollment year</option>{Array.from({ length: 8 }, (_, index) => new Date().getFullYear() - index).map(year => <option key={year} value={year}>{year}</option>)}</select></Field></div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Gender"><select value={formData.gender} onChange={e => updateField('gender', e.target.value)} className="form-input"><option value="">Prefer not to say</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></Field><Field label="Status"><select value={formData.status} onChange={e => updateField('status', e.target.value)} className="form-input"><option value="Active">Active</option><option value="Inactive">Inactive</option></select></Field></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><Field label="Emergency Contact"><input value={formData.emergency_phone} onChange={e => updateField('emergency_phone', e.target.value)} placeholder="Emergency phone number" className="form-input" /></Field><Field label="Library Membership"><select value={formData.library_member ? 'yes' : 'no'} onChange={e => updateField('library_member', e.target.value === 'yes')} className="form-input"><option value="yes">Library member</option><option value="no">No library access</option></select></Field></div>
           <Field label="Residential Address"><textarea rows={3} value={formData.address} onChange={e => updateField('address', e.target.value)} placeholder="Residential address" className="form-input resize-none" /></Field>
+          <Field label="Remarks"><textarea rows={2} value={formData.remarks} onChange={e => updateField('remarks', e.target.value)} placeholder="Optional notes about the student" className="form-input resize-none" /></Field>
 
-          <button type="submit" disabled={submitting} className="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50">{submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? <Save className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}{submitting ? 'Saving…' : editing ? 'Save Student Changes' : 'Create Student Profile'}</button>
+          <div className="flex gap-3"><button type="button" disabled={submitting} onClick={() => navigate('/admin/students')} className="flex-1 rounded-xl border border-slate-700 px-4 py-3 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-50">Cancel</button><button type="submit" disabled={submitting} className="flex-[2] py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50">{submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? <Save className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}{submitting ? 'Saving…' : editing ? 'Save Student Changes' : 'Save Student'}</button></div>
         </div>
 
         <div className="space-y-4"><WebcamCapture onCaptureConfirmed={handlePhotoConfirmed} isSubmitting={submitting} /><div className="p-4 bg-slate-900/70 border border-slate-800 rounded-xl text-xs text-slate-400"><p className="font-semibold text-slate-200">Face profile enrollment</p><p className="mt-1">A clear single-face photo is required before automatic attendance can recognize this student. You can save the student first and enroll the face later from the profile.</p></div>{confirmedPhotoPreview && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3"><div className="w-12 h-12 rounded-lg overflow-hidden border border-emerald-500/40 shrink-0"><img src={confirmedPhotoPreview} alt="Selected student face" className="w-full h-full object-cover" /></div><div className="text-xs text-emerald-300"><p className="font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Face photo ready</p><p className="text-[11px] text-emerald-400/80">It will be validated and enrolled when you save.</p></div></div>}</div>

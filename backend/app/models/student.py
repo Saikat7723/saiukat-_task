@@ -17,7 +17,12 @@ class Student(Base):
     dob = Column(Date, nullable=True)
     gender = Column(String(20), nullable=True)
     date_of_joining = Column(Date, nullable=True)
+    semester = Column(String(50), nullable=True)
+    enrollment_year = Column(Integer, nullable=True)
     address = Column(Text, nullable=True)
+    emergency_phone = Column(String(20), nullable=True)
+    remarks = Column(Text, nullable=True)
+    library_member = Column(Boolean, default=True, nullable=False)
     profile_photo_path = Column(String(255), nullable=True)
     status = Column(String(20), default="Active", nullable=False) # Active / Inactive
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

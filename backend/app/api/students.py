@@ -3,7 +3,7 @@ import uuid
 import cv2
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, Response, status, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -19,14 +19,58 @@ from app.face_recognition.engine import face_engine, ModelUnavailable, MODEL_VER
 router = APIRouter(prefix="/students", tags=["Students"])
 logger = logging.getLogger("api.students")
 
+
+def _next_student_id(db: Session) -> str:
+    """Return the next system-managed student identifier.
+
+    The identifier is generated on the server so it remains unique even when
+    the admin UI is bypassed.
+    """
+    student_codes = db.query(Student.student_id).filter(Student.student_id.like("STU%")).all()
+    highest = 0
+    for (student_code,) in student_codes:
+        suffix = (student_code or "")[3:]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return f"STU{highest + 1:06d}"
+
+
+@router.get("/next-id")
+def get_next_student_id(
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user),
+):
+    return {"student_id": _next_student_id(db)}
+
+
+@router.get("/summary")
+def get_student_summary(
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user),
+):
+    total = db.query(Student).count()
+    active = db.query(Student).filter(Student.status == "Active").count()
+    face_enrolled = db.query(StudentFaceProfile).filter(StudentFaceProfile.is_active.is_(True)).count()
+    library_members = db.query(Student).filter(Student.library_member.is_(True), Student.status == "Active").count()
+    return {
+        "total": total,
+        "active": active,
+        "inactive": total - active,
+        "face_enrolled": face_enrolled,
+        "library_members": library_members,
+    }
+
 @router.get("", response_model=List[StudentResponse])
 def list_students(
     search: Optional[str] = Query(None),
     department_id: Optional[int] = Query(None),
     course_id: Optional[int] = Query(None),
+    enrollment_year: Optional[int] = Query(None),
     status_filter: Optional[str] = Query(None),
     skip: int = 0,
-    limit: int = 100,
+    page: Optional[int] = Query(None, ge=1),
+    limit: int = Query(100, ge=1, le=100),
+    response: Response = None,
     db: Session = Depends(get_db),
     current_user: Admin = Depends(get_current_user)
 ):
@@ -46,9 +90,15 @@ def list_students(
         query = query.filter(Student.department_id == department_id)
     if course_id:
         query = query.filter(Student.course_id == course_id)
+    if enrollment_year:
+        query = query.filter(Student.enrollment_year == enrollment_year)
     if status_filter:
         query = query.filter(Student.status == status_filter)
 
+    total = query.count()
+    if page is not None:
+        skip = (page - 1) * limit
+    response.headers["X-Total-Count"] = str(total)
     students = query.order_by(Student.created_at.desc()).offset(skip).limit(limit).all()
 
     # Annotate has_face_profile
@@ -66,12 +116,13 @@ def create_student(
     db: Session = Depends(get_db),
     current_user: Admin = Depends(get_current_user)
 ):
+    student_code = (student_in.student_id or _next_student_id(db)).strip().upper()
     # Check duplicate student_id or email
-    existing_id = db.query(Student).filter(Student.student_id == student_in.student_id).first()
+    existing_id = db.query(Student).filter(Student.student_id == student_code).first()
     if existing_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Student ID / Roll Number '{student_in.student_id}' already exists."
+            detail=f"Student ID / Roll Number '{student_code}' already exists."
         )
 
     existing_email = db.query(Student).filter(Student.email == student_in.email).first()
@@ -79,6 +130,12 @@ def create_student(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Student Email '{student_in.email}' already exists."
+        )
+    admin_with_email = db.query(Admin).filter(Admin.email == student_in.email).first()
+    if admin_with_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This email belongs to an administrator. Use a different student email."
         )
 
     if student_in.department_id:
@@ -91,7 +148,8 @@ def create_student(
         if student_in.department_id and course.department_id != student_in.department_id:
             raise HTTPException(status_code=400, detail="Selected course does not belong to the selected department.")
 
-    student_data = student_in.model_dump(exclude={"password"})
+    student_data = student_in.model_dump(exclude={"password", "student_id"})
+    student_data["student_id"] = student_code
     student = Student(**student_data)
     if student_in.password:
         if len(student_in.password) < 8:
@@ -139,6 +197,13 @@ def update_student(
         raise HTTPException(status_code=404, detail="Student not found")
 
     update_data = student_in.model_dump(exclude_unset=True)
+    if "student_id" in update_data:
+        update_data["student_id"] = update_data["student_id"].strip().upper()
+        duplicate = db.query(Student).filter(
+            Student.student_id == update_data["student_id"], Student.id != student.id
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=400, detail=f"Student ID / Roll Number '{update_data['student_id']}' already exists.")
     if "email" in update_data and update_data["email"] != student.email:
         duplicate = db.query(Student).filter(Student.email == update_data["email"], Student.id != student.id).first()
         if duplicate:

@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.orm import Session
@@ -141,6 +141,64 @@ def create_manual_attendance(
         "department_name": student.department.name if student.department else None
     }
     return res
+
+
+@router.post("/{session_id}/checkout")
+def check_out_attendance(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user)
+):
+    """Close an active verified session after the operator confirms departure."""
+    session = db.query(AttendanceSession).join(Student).filter(AttendanceSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Attendance session not found")
+    if session.check_out_time:
+        raise HTTPException(status_code=409, detail="This attendance session has already been checked out")
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now < session.check_in_time:
+        raise HTTPException(status_code=400, detail="Check-out cannot be earlier than check-in")
+
+    session.check_out_time = now
+    session.duration_minutes = max(0, int((now - session.check_in_time).total_seconds() // 60))
+    db.add(AttendanceEvent(
+        student_id=session.student_id,
+        event_type="CHECK_OUT",
+        timestamp=now,
+        confidence=session.confidence,
+        camera_id=session.camera_id,
+        raw_info="Operator confirmed check-out from the live attendance monitor"
+    ))
+    db.add(AuditLog(
+        admin_id=current_user.id,
+        admin_email=current_user.email,
+        action="ATTENDANCE_CHECK_OUT",
+        target_type="AttendanceSession",
+        target_id=str(session.id),
+        details=f"Checked out {session.student.full_name} from attendance session {session.id}"
+    ))
+    db.commit()
+    db.refresh(session)
+
+    return {
+        "success": True,
+        "action": "CHECK_OUT",
+        "session_id": session.id,
+        "timestamp": session.check_out_time.replace(tzinfo=timezone.utc).isoformat(),
+        "check_in_time": session.check_in_time.replace(tzinfo=timezone.utc).isoformat(),
+        "check_out_time": session.check_out_time.replace(tzinfo=timezone.utc).isoformat(),
+        "duration_minutes": session.duration_minutes,
+        "student": {
+            "id": session.student.id,
+            "student_id": session.student.student_id,
+            "full_name": session.student.full_name,
+            "email": session.student.email,
+            "profile_photo_path": session.student.profile_photo_path,
+            "department_name": session.student.department.name if session.student.department else None,
+            "course_name": session.student.course.name if session.student.course else None,
+        },
+    }
 
 @router.get("/student/{student_id}/summary", response_model=AttendanceSummaryStats)
 def get_student_attendance_summary(

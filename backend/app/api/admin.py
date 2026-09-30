@@ -11,15 +11,24 @@ from app.core.security import get_current_user, require_admin, Admin
 router = APIRouter(prefix="/admin", tags=["Admin & System Settings"])
 
 @router.get("/departments")
-def list_departments(db: Session = Depends(get_db)):
-    return db.query(Department).all()
+def list_departments(
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(require_admin),
+):
+    """Return the institution's configured departments for admin forms."""
+    return db.query(Department).order_by(Department.name.asc()).all()
 
 @router.get("/courses")
-def list_courses(department_id: Optional[int] = None, db: Session = Depends(get_db)):
+def list_courses(
+    department_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(require_admin),
+):
+    """Return real courses, optionally limited to the selected department."""
     query = db.query(Course)
     if department_id:
         query = query.filter(Course.department_id == department_id)
-    return query.all()
+    return query.order_by(Course.name.asc()).all()
 
 @router.get("/cameras")
 def list_cameras(db: Session = Depends(get_db), current_user: Admin = Depends(get_current_user)):

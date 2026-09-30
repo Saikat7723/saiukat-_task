@@ -1,6 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional, List, Any
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 class StudentSimpleInfo(BaseModel):
     id: int
@@ -25,6 +25,11 @@ class AttendanceSessionResponse(BaseModel):
     camera_id: Optional[str] = None
     notes: Optional[str] = None
     student: Optional[StudentSimpleInfo] = None
+
+    @field_serializer("check_in_time", "check_out_time", when_used="json")
+    def serialize_utc_time(self, value: Optional[datetime]):
+        """Database timestamps are UTC; keep that fact when sending them to browsers."""
+        return value.replace(tzinfo=timezone.utc).isoformat() if value else None
 
     class Config:
         from_attributes = True

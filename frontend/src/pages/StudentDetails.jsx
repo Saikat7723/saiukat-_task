@@ -84,7 +84,7 @@ export const StudentDetails = () => {
 
   return (
     <div className="space-y-6">
-      <Link to="/students" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition">
+      <Link to="/admin/students" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition">
         <ArrowLeft className="w-4 h-4" />
         Back to Student Directory
       </Link>

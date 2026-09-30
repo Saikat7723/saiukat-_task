@@ -474,3 +474,25 @@
 .profile-modal-input:focus { border-color: rgb(37 99 235); box-shadow: 0 0 0 3px rgb(37 99 235 / 0.12); }
 .profile-modal-input:disabled { cursor: not-allowed; color: rgb(100 116 139); }
 .profile-modal-icon { position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); color: rgb(100 116 139); pointer-events: none; }
+.profile-modal-has-icon { padding-left: 3rem; }
+.profile-modal-textarea-icon { top: 0.9rem; transform: none; }
+.profile-modal-input[type="email"], .profile-modal-input[type="tel"] { letter-spacing: 0.01em; }
+.profile-modal-input.resize-none { min-height: 5.75rem; line-height: 1.45; }
+
+/* Admin portal: light workspace matching the student-portal visual language. */
+.admin-shell { background: #edf4fb; }
+.admin-workspace { color: #172554; }
+.admin-workspace .bg-slate-900, .admin-workspace .bg-slate-900\/60, .admin-workspace .bg-slate-900\/70, .admin-workspace .bg-slate-900\/80, .admin-workspace .bg-slate-900\/90 { background-color: rgba(255, 255, 255, .96) !important; }
+.admin-workspace .bg-slate-950, .admin-workspace .bg-slate-950\/60 { background-color: #f7faff !important; }
+.admin-workspace .border-slate-800, .admin-workspace .border-slate-800\/60, .admin-workspace .border-slate-800\/80, .admin-workspace .border-slate-700 { border-color: #d9e3f0 !important; }
+.admin-workspace .text-slate-100, .admin-workspace .text-slate-200 { color: #0f1d3a !important; }
+.admin-workspace .text-slate-300 { color: #334b70 !important; }
+.admin-workspace .text-slate-400, .admin-workspace .text-slate-500 { color: #60789c !important; }
+.admin-workspace .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]) { border-color: #e5edf6 !important; }
+.admin-workspace .hover\:bg-slate-800\/40:hover { background-color: #f1f7ff !important; }
+.admin-workspace input:not([type="checkbox"]):not([type="radio"]), .admin-workspace select, .admin-workspace textarea { color: #15223d; }
+.admin-workspace .form-input { border-color: #cddbeb; background: #fff; color: #15223d; }
+.admin-workspace .form-input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+.admin-workspace input::placeholder, .admin-workspace textarea::placeholder { color: #8396b3; }
+.admin-workspace table thead { background: #edf5ff !important; }
+.admin-workspace .shadow-xl { box-shadow: 0 12px 30px rgba(33, 67, 112, .08) !important; }

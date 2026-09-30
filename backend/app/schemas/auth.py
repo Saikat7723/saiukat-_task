@@ -5,6 +5,7 @@ from app.models.user import UserRole
 class LoginRequest(BaseModel):
     username_or_email: str
     password: str
+    account_type: Optional[Literal["student", "admin"]] = None
 
 
 class ForgotPasswordRequest(BaseModel):

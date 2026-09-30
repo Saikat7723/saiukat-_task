@@ -12,13 +12,20 @@ class StudentBase(BaseModel):
     dob: Optional[date] = None
     gender: Optional[str] = None
     date_of_joining: Optional[date] = None
+    semester: Optional[str] = None
+    enrollment_year: Optional[int] = None
     address: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    remarks: Optional[str] = None
+    library_member: bool = True
     status: str = "Active"
 
 class StudentCreate(StudentBase):
+    student_id: Optional[str] = None
     password: str = Field(min_length=8, max_length=128)
 
 class StudentUpdate(BaseModel):
+    student_id: Optional[str] = Field(default=None, min_length=1, max_length=50)
     full_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -27,7 +34,12 @@ class StudentUpdate(BaseModel):
     dob: Optional[date] = None
     gender: Optional[str] = None
     date_of_joining: Optional[date] = None
+    semester: Optional[str] = None
+    enrollment_year: Optional[int] = None
     address: Optional[str] = None
+    emergency_phone: Optional[str] = None
+    remarks: Optional[str] = None
+    library_member: Optional[bool] = None
     status: Optional[str] = None
 
 class DepartmentSimple(BaseModel):

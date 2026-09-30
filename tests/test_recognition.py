@@ -37,6 +37,8 @@ def setup(tmp_path):
             yield db
     app.dependency_overrides[get_db] = database
     recognition.observations.clear()
+    recognition.active_presence.clear()
+    recognition.departed_students.clear()
     headers = {'Authorization': f"Bearer {create_access_token({'sub': 'camera@test.com'})}"}
     with TestClient(app) as client:
         yield client, factory, headers
@@ -59,7 +61,7 @@ def test_requires_authentication_and_disables_forged_identity(setup):
     assert client.post('/api/attendance/events', headers=headers, json={'student_id':1, 'confidence':1, 'camera_id':'test-camera'}).status_code == 410
 
 
-def test_persists_only_after_stable_match_and_never_toggles_checkout(setup, monkeypatch):
+def test_continuous_match_does_not_toggle_but_departure_and_reentry_checks_out(setup, monkeypatch):
     client, factory, headers = setup
     monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: observation([1.0]+[0.0]*127))
     for _ in range(settings.FACE_CONFIRM_FRAMES-1):
@@ -78,6 +80,20 @@ def test_persists_only_after_stable_match_and_never_toggles_checkout(setup, monk
         assert db.query(AttendanceSession).count() == 1
         assert db.query(AttendanceEvent).count() == 1
         assert db.query(AttendanceSession).first().check_out_time is None
+
+    # A real absence clears the camera presence state. When the student returns,
+    # a stable verified match closes that active session.
+    monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: (np.zeros((480, 640, 3), np.uint8), []))
+    assert send(client, headers).json()['state'] == 'NO_FACE'
+    monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: observation([1.0]+[0.0]*127))
+    for _ in range(settings.FACE_CONFIRM_FRAMES - 1):
+        assert send(client, headers).json()['state'] == 'VERIFYING'
+    result = send(client, headers).json()
+    assert result['attendance']['action'] == 'CHECK_OUT'
+    with factory() as db:
+        session = db.query(AttendanceSession).one()
+        assert session.check_out_time is not None
+        assert db.query(AttendanceEvent).count() == 2
 
 
 @pytest.mark.parametrize('kind', ['blank', 'unknown', 'multiple', 'blurred', 'legacy', 'inactive', 'ambiguous'])

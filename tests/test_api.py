@@ -101,8 +101,7 @@ def test_login_failure(client):
     })
     assert response.status_code == 401
 
-def test_student_crud(client):
-    # Obtain Auth Token
+def test_student_crud_and_generated_identifier(client):
     login_res = client.post("/api/auth/login", json={
         "username_or_email": "admin@test.com",
         "password": "password123"
@@ -110,9 +109,11 @@ def test_student_crud(client):
     token = login_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    # Create Student
+    next_id = client.get("/api/students/next-id", headers=headers)
+    assert next_id.status_code == 200
+    assert next_id.json()["student_id"].startswith("STU")
+
     payload = {
-        "student_id": "STU999",
         "full_name": "Test Student",
         "email": "test.student@univ.edu",
         "phone": "9998887770",
@@ -123,13 +124,56 @@ def test_student_crud(client):
     }
     create_res = client.post("/api/students", json=payload, headers=headers)
     assert create_res.status_code == 201
-    stu_data = create_res.json()
-    assert stu_data["student_id"] == "STU999"
+    created = create_res.json()
+    assert created["student_id"].startswith("STU")
 
-    # List Students
     list_res = client.get("/api/students", headers=headers)
     assert list_res.status_code == 200
-    assert len(list_res.json()) >= 1
+    assert any(student["id"] == created["id"] for student in list_res.json())
+
+    summary = client.get("/api/students/summary", headers=headers)
+    assert summary.status_code == 200
+    assert summary.json()["total"] >= 1
+
+
+def test_admin_can_check_out_an_active_attendance_session(client, db):
+    login_res = client.post("/api/auth/login", json={
+        "username_or_email": "admin@test.com",
+        "password": "password123"
+    })
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+    checkout_student = Student(
+        student_id="CHECKOUT001",
+        full_name="Checkout Student",
+        email="checkout.student@univ.edu",
+        status="Active",
+    )
+    db.add(checkout_student)
+    db.commit()
+    db.refresh(checkout_student)
+    active = AttendanceSession(
+        student_id=checkout_student.id,
+        session_date=date.today(),
+        check_in_time=datetime.utcnow() - timedelta(minutes=20),
+        duration_minutes=0,
+        status="Present",
+        confidence=0.9,
+        camera_id="TEST_CAMERA"
+    )
+    db.add(active)
+    db.commit()
+    db.refresh(active)
+
+    response = client.post(f"/api/attendance/{active.id}/checkout", headers=headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"] == "CHECK_OUT"
+    assert payload["check_out_time"] is not None
+    assert payload["check_out_time"].endswith("+00:00")
+    assert payload["duration_minutes"] >= 20
+
+    duplicate = client.post(f"/api/attendance/{active.id}/checkout", headers=headers)
+    assert duplicate.status_code == 409
 
 def test_book_issue_and_return(client):
     login_res = client.post("/api/auth/login", json={

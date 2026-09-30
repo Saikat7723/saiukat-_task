@@ -1,10 +1,10 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 import os
 import uuid
 import cv2
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -26,11 +26,10 @@ class PasswordChange(BaseModel):
 
 
 class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     full_name: str = Field(min_length=1, max_length=120)
     phone: str | None = Field(default=None, max_length=20)
-    department_id: int | None = None
-    course_id: int | None = None
-    date_of_joining: date | None = None
     dob: date | None = None
     gender: str | None = Field(default=None, max_length=20)
     address: str | None = None
@@ -59,11 +58,14 @@ def _student_payload(student: Student) -> dict[str, Any]:
 
 
 def _attendance_payload(session: AttendanceSession) -> dict[str, Any]:
+    def utc_iso(value: datetime | None) -> str | None:
+        return value.replace(tzinfo=timezone.utc).isoformat() if value else None
+
     return {
         "id": session.id,
         "session_date": session.session_date.isoformat(),
-        "check_in_time": session.check_in_time.isoformat(),
-        "check_out_time": session.check_out_time.isoformat() if session.check_out_time else None,
+        "check_in_time": utc_iso(session.check_in_time),
+        "check_out_time": utc_iso(session.check_out_time),
         "duration_minutes": session.duration_minutes,
         "status": session.status,
         "confidence": session.confidence,
@@ -122,8 +124,8 @@ def get_student_dashboard(current_student: Student = Depends(get_current_student
             "present_days": present_days,
             "absent_days": absent_days,
             "attendance_percentage": round(present_days / total_working_days * 100, 1) if total_working_days else 0.0,
-            "today_check_in": today_session.check_in_time.isoformat() if today_session else None,
-            "today_check_out": today_session.check_out_time.isoformat() if today_session and today_session.check_out_time else None,
+            "today_check_in": _attendance_payload(today_session)["check_in_time"] if today_session else None,
+            "today_check_out": _attendance_payload(today_session)["check_out_time"] if today_session else None,
         },
         "recent_attendance": [_attendance_payload(s) for s in sessions[:10]],
         "library": {
@@ -153,16 +155,6 @@ def get_academic_options(db: Session = Depends(get_db), current_student: Student
 def update_student_profile(payload: ProfileUpdate, current_student: Student = Depends(get_current_student), db: Session = Depends(get_db)):
     if not payload.full_name.strip():
         raise HTTPException(status_code=400, detail="Full name cannot be empty.")
-    if payload.department_id:
-        department = db.query(Department).filter(Department.id == payload.department_id).first()
-        if not department:
-            raise HTTPException(status_code=400, detail="Selected department does not exist.")
-    if payload.course_id:
-        course = db.query(Course).filter(Course.id == payload.course_id).first()
-        if not course:
-            raise HTTPException(status_code=400, detail="Selected course does not exist.")
-        if payload.department_id and course.department_id != payload.department_id:
-            raise HTTPException(status_code=400, detail="Selected course does not belong to the selected department.")
 
     for field, value in payload.model_dump().items():
         if field == "full_name":

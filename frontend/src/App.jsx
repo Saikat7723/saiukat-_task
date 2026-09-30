@@ -20,7 +20,7 @@ import { StudentPortal } from './pages/StudentPortal';
 
 const RoleHome = () => {
   const { user } = useAuth();
-  return <Navigate to={user?.role === 'student' ? '/student/dashboard' : '/dashboard'} replace />;
+  return <Navigate to={user?.role === 'student' ? '/student/dashboard' : '/admin/dashboard'} replace />;
 };
 
 const AdminOnly = ({ children }) => {
@@ -68,6 +68,15 @@ export default function App() {
             <Route path="student/library" element={<StudentPortal section="library" />} />
             <Route path="student/notifications" element={<StudentPortal section="notifications" />} />
             <Route path="student/settings" element={<StudentPortal section="settings" />} />
+          </Route>
+
+          <Route path="/admin" element={<MainLayout />}>
+            <Route index element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="dashboard" element={<AdminOnly><Dashboard /></AdminOnly>} />
+            <Route path="students" element={<AdminOnly><StudentList /></AdminOnly>} />
+            <Route path="students/add" element={<AdminOnly><StudentAdd /></AdminOnly>} />
+            <Route path="students/:id" element={<AdminOnly><StudentDetails /></AdminOnly>} />
+            <Route path="students/:id/edit" element={<AdminOnly><StudentAdd /></AdminOnly>} />
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

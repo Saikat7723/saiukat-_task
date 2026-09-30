@@ -53,8 +53,8 @@ export const AuthProvider = ({ children }) => {
     checkAuth();
   }, []);
 
-  const login = async (username_or_email, password, remember = true) => {
-    const res = await apiClient.post('/auth/login', { username_or_email, password });
+  const login = async (username_or_email, password, remember = true, account_type = null) => {
+    const res = await apiClient.post('/auth/login', { username_or_email, password, account_type });
     const { access_token, user: userData } = res.data;
     localStorage.removeItem('token');
     localStorage.removeItem('user');

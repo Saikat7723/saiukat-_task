@@ -46,14 +46,23 @@ def _send_reset_email(recipient: str, reset_url: str, expires_at: datetime) -> b
 @router.post("/login", response_model=TokenResponse)
 def login(login_req: LoginRequest, db: Session = Depends(get_db)):
     identifier = login_req.username_or_email.strip()
-    user = db.query(Admin).filter(Admin.email == identifier).first()
-    is_student = False
-    if not user:
+    is_student = login_req.account_type == "student"
+    if login_req.account_type == "student":
         user = db.query(Student).filter(
             (Student.email == identifier) | (Student.student_id == identifier),
             Student.status == "Active",
         ).first()
-        is_student = user is not None
+    elif login_req.account_type == "admin":
+        user = db.query(Admin).filter(Admin.email == identifier).first()
+    else:
+        # Backward-compatible login for existing API clients that do not send a role.
+        user = db.query(Admin).filter(Admin.email == identifier).first()
+        if not user:
+            user = db.query(Student).filter(
+                (Student.email == identifier) | (Student.student_id == identifier),
+                Student.status == "Active",
+            ).first()
+            is_student = user is not None
 
     if not user or not user.hashed_password or not verify_password(login_req.password, user.hashed_password):
         raise HTTPException(

@@ -15,6 +15,15 @@ from app.core.config import settings
 
 router = APIRouter(prefix="/book-issues", tags=["Book Issues"])
 
+@router.get("/eligible-students")
+def list_eligible_students(
+    db: Session = Depends(get_db),
+    current_user: Admin = Depends(get_current_user),
+):
+    """Provide the minimal student identity data needed to issue a library book."""
+    students = db.query(Student).filter(Student.status == "Active").order_by(Student.full_name).all()
+    return [{"id": student.id, "full_name": student.full_name, "student_id": student.student_id} for student in students]
+
 @router.get("", response_model=List[BookIssueResponse])
 def list_book_issues(
     student_id: Optional[int] = Query(None),

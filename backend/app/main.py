@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.database.session import engine, Base
+from app.database.session import engine, Base, SessionLocal
+from app.core.academic_catalog import ensure_academic_catalog
 from app.api.auth import router as auth_router
 from app.api.students import router as student_router
 from app.api.attendance import router as attendance_router
@@ -56,6 +57,20 @@ def startup_event():
     if "hashed_password" not in {column["name"] for column in inspect(engine).get_columns("students")}:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE students ADD COLUMN hashed_password VARCHAR(255)"))
+    student_columns = {column["name"] for column in inspect(engine).get_columns("students")}
+    missing_student_columns = {
+        "semester": "VARCHAR(50)",
+        "enrollment_year": "INTEGER",
+        "emergency_phone": "VARCHAR(20)",
+        "remarks": "TEXT",
+        "library_member": "BOOLEAN NOT NULL DEFAULT 1",
+    }
+    with engine.begin() as connection:
+        for column_name, column_type in missing_student_columns.items():
+            if column_name not in student_columns:
+                connection.execute(text(f"ALTER TABLE students ADD COLUMN {column_name} {column_type}"))
+    with SessionLocal() as db:
+        ensure_academic_catalog(db)
 
 @app.get("/")
 def root():
@@ -64,6 +79,16 @@ def root():
         "system": settings.PROJECT_NAME,
         "docs": "/docs",
         "version": "1.0.0"
+    }
+
+@app.get(settings.API_V1_STR)
+def api_root():
+    """Expose a useful response for the API base URL used by the frontend."""
+    return {
+        "status": "online",
+        "system": settings.PROJECT_NAME,
+        "documentation": "/docs",
+        "openapi": f"{settings.API_V1_STR}/openapi.json",
     }
 
 @app.exception_handler(Exception)

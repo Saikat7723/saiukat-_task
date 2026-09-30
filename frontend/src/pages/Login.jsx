@@ -44,7 +44,7 @@ export const Login = () => {
     setLoading(true);
 
     try {
-      const user = await login(usernameOrEmail.trim(), password, remember);
+      const user = await login(usernameOrEmail.trim(), password, remember, loginType);
       navigate(user.role === 'student' ? '/student/dashboard' : '/dashboard');
     } catch (err) {
       setError(err.response?.data?.detail || 'Invalid login credentials. Please try again.');
