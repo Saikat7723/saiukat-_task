@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, CheckCircle2, Eye, EyeOff, Save, UserPlus } from 'lucide-react';
 import apiClient from '../api/axios';
@@ -37,6 +37,7 @@ export const StudentAdd = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const editing = Boolean(id);
+  const formRef = useRef(null);
   const [formData, setFormData] = useState(emptyForm);
   const [departments, setDepartments] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -203,7 +204,7 @@ export const StudentAdd = () => {
       {errorMsg && <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-start gap-3" role="alert"><AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" /><div><p className="font-semibold">Could not save student</p><p className="mt-0.5">{errorMsg}</p></div></div>}
       {academicError && <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs">{academicError}</div>}
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <form ref={formRef} onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2"><h2 className="text-sm font-bold text-slate-200">Personal &amp; Academic Information</h2>{academicLoading && <span className="text-[11px] text-slate-500">Loading options…</span>}</div>
 
@@ -221,7 +222,7 @@ export const StudentAdd = () => {
           <div className="flex gap-3"><button type="button" disabled={submitting} onClick={() => navigate('/admin/students')} className="flex-1 rounded-xl border border-slate-700 px-4 py-3 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 disabled:opacity-50">Cancel</button><button type="submit" disabled={submitting} className="flex-[2] py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-600/20 transition flex items-center justify-center gap-2 disabled:opacity-50">{submitting ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? <Save className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}{submitting ? 'Saving…' : editing ? 'Save Student Changes' : 'Save Student'}</button></div>
         </div>
 
-        <div className="space-y-4"><WebcamCapture onCaptureConfirmed={handlePhotoConfirmed} onCaptureCleared={handlePhotoCleared} autoConfirm isSubmitting={submitting} /><div className="p-4 bg-slate-900/70 border border-slate-800 rounded-xl text-xs text-slate-400"><p className="font-semibold text-slate-200">Face profile enrollment</p><p className="mt-1">Capture or upload a clear single-face photo. It is attached to this student and validated for face attendance when you save.</p></div>{confirmedPhotoPreview && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3"><div className="w-12 h-12 rounded-lg overflow-hidden border border-emerald-500/40 shrink-0"><img src={confirmedPhotoPreview} alt="Selected student face" className="w-full h-full object-cover" /></div><div className="text-xs text-emerald-300"><p className="font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Photo attached</p><p className="text-[11px] text-emerald-400/80">It will be validated and enrolled when you save.</p></div></div>}</div>
+        <div className="space-y-4"><WebcamCapture onCaptureConfirmed={handlePhotoConfirmed} onCaptureCleared={handlePhotoCleared} autoConfirm isSubmitting={submitting} onSaveClicked={() => { if (formRef.current) formRef.current.requestSubmit(); }} /><div className="p-4 bg-slate-900/70 border border-slate-800 rounded-xl text-xs text-slate-400"><p className="font-semibold text-slate-200">Face profile enrollment</p><p className="mt-1">Capture or upload a clear single-face photo. It is attached to this student and validated for face attendance when you save.</p></div>{confirmedPhotoPreview && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3"><div className="w-12 h-12 rounded-lg overflow-hidden border border-emerald-500/40 shrink-0"><img src={confirmedPhotoPreview} alt="Selected student face" className="w-full h-full object-cover" /></div><div className="text-xs text-emerald-300"><p className="font-semibold flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Photo attached</p><p className="text-[11px] text-emerald-400/80">It will be validated and enrolled when you save.</p></div></div>}</div>
       </form>
     </div>
   );

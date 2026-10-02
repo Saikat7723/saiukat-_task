@@ -8,7 +8,7 @@ const videoConstraints = {
   facingMode: "user"
 };
 
-export const WebcamCapture = ({ onCaptureConfirmed, onCaptureCleared, isSubmitting, autoConfirm = false }) => {
+export const WebcamCapture = ({ onCaptureConfirmed, onCaptureCleared, isSubmitting, autoConfirm = false, onSaveClicked }) => {
   const webcamRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
@@ -65,6 +65,7 @@ export const WebcamCapture = ({ onCaptureConfirmed, onCaptureCleared, isSubmitti
     if (capturedImage && onCaptureConfirmed) {
       if (capturedBlob) {
         onCaptureConfirmed(capturedBlob, capturedImage);
+        if (onSaveClicked) onSaveClicked();
         return;
       }
       // Convert base64 to Blob
@@ -72,6 +73,7 @@ export const WebcamCapture = ({ onCaptureConfirmed, onCaptureCleared, isSubmitti
         .then(res => res.blob())
         .then(blob => {
           onCaptureConfirmed(blob, capturedImage);
+          if (onSaveClicked) onSaveClicked();
         })
         .catch(err => {
           setErrorMsg("Could not process image snapshot: " + err.message);
