@@ -1,185 +1,85 @@
-import logging
-from datetime import datetime, date, timedelta
-from typing import Dict, Any, Optional
-from sqlalchemy.orm import Session
+"""Shared daily attendance policy. All creation paths use the server clock."""
+from datetime import datetime, timezone, time
+from zoneinfo import ZoneInfo
 
+from app.core.config import settings
 from app.models.student import Student
 from app.models.attendance import AttendanceSession, AttendanceEvent, AttendanceSetting
-from app.core.config import settings
 
-logger = logging.getLogger("attendance.engine")
 
 class AttendanceEngine:
+    DEFAULTS = {"attendance_start_time": "00:00", "attendance_cutoff_time": "10:00"}
+
     @staticmethod
-    def get_setting(db: Session, key: str, default_val: Any) -> Any:
-        setting = db.query(AttendanceSetting).filter(AttendanceSetting.setting_key == key).first()
-        if setting:
-            if isinstance(default_val, float):
-                return float(setting.setting_value)
-            elif isinstance(default_val, int):
-                return int(setting.setting_value)
-            return setting.setting_value
-        return default_val
+    def server_now():
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def get_setting(db, key, default_val):
+        setting = db.query(AttendanceSetting).filter_by(setting_key=key).first()
+        return type(default_val)(setting.setting_value) if setting else default_val
 
     @classmethod
-    def process_recognition_event(
-        cls,
-        db: Session,
-        student_id: int,
-        confidence: float,
-        camera_id: str,
-        timestamp: Optional[datetime] = None
-    ) -> Dict[str, Any]:
-        if timestamp is None:
-            timestamp = datetime.utcnow()
+    def ensure_settings(cls, db):
+        for key, value in cls.DEFAULTS.items():
+            if not db.query(AttendanceSetting).filter_by(setting_key=key).first():
+                db.add(AttendanceSetting(setting_key=key, setting_value=value))
+        db.commit()
 
-        today_date = timestamp.date()
+    @classmethod
+    def process_recognition_event(cls, db, student_id, confidence, camera_id, timestamp=None):
+        # Legacy callers cannot backdate attendance with a supplied timestamp.
+        if confidence < cls.get_setting(db, "FACE_RECOGNITION_THRESHOLD", settings.FACE_RECOGNITION_THRESHOLD):
+            return {"success": False, "action": "IGNORED_LOW_CONFIDENCE"}
+        return cls.record_daily_attendance(db, student_id, confidence, camera_id)
 
-        # Load thresholds
-        min_confidence = cls.get_setting(db, "FACE_RECOGNITION_THRESHOLD", settings.FACE_RECOGNITION_THRESHOLD)
-        cooldown_sec = cls.get_setting(db, "ATTENDANCE_COOLDOWN_SECONDS", settings.ATTENDANCE_COOLDOWN_SECONDS)
-
-        # 1. Validate confidence
-        if confidence < min_confidence:
-            event = AttendanceEvent(
-                student_id=student_id,
-                event_type="LOW_CONFIDENCE",
-                timestamp=timestamp,
-                confidence=confidence,
-                camera_id=camera_id,
-                raw_info=f"Confidence {confidence:.2f} below threshold {min_confidence:.2f}"
-            )
-            db.add(event)
-            db.commit()
-            return {
-                "success": False,
-                "action": "IGNORED_LOW_CONFIDENCE",
-                "message": f"Confidence {confidence:.2f} below required threshold {min_confidence:.2f}"
-            }
-
-        # 2. Cooldown check - inspect most recent event for this student
-        recent_event = db.query(AttendanceEvent)\
-            .filter(AttendanceEvent.student_id == student_id)\
-            .order_by(AttendanceEvent.timestamp.desc())\
-            .first()
-
-        if recent_event:
-            elapsed_seconds = (timestamp - recent_event.timestamp).total_seconds()
-            if elapsed_seconds < cooldown_sec:
-                # In cooldown window
-                event = AttendanceEvent(
-                    student_id=student_id,
-                    event_type="COOLDOWN_SKIPPED",
-                    timestamp=timestamp,
-                    confidence=confidence,
-                    camera_id=camera_id,
-                    raw_info=f"Ignored due to cooldown ({int(elapsed_seconds)}s < {cooldown_sec}s)"
-                )
-                db.add(event)
-                db.commit()
-                return {
-                    "success": True,
-                    "action": "COOLDOWN_ACTIVE",
-                    "message": f"Recognized student, but in cooldown window ({int(elapsed_seconds)}s elapsed)"
-                }
-
-        # 3. Process Attendance Session (Check-In / Check-Out)
-        student = db.query(Student).filter(Student.id == student_id, Student.status == "Active").first()
-        if not student:
-            return {
-                "success": False,
-                "action": "INACTIVE_STUDENT",
-                "message": "Student is inactive or deleted"
-            }
-
-        # Check for open session today
-        open_session = db.query(AttendanceSession)\
-            .filter(
-                AttendanceSession.student_id == student_id,
-                AttendanceSession.session_date == today_date,
-                AttendanceSession.check_out_time.is_(None)
-            )\
-            .order_by(AttendanceSession.check_in_time.desc())\
-            .first()
-
-        if open_session is None:
-            # Create NEW Check-In Session
-            new_session = AttendanceSession(
-                student_id=student_id,
-                session_date=today_date,
-                check_in_time=timestamp,
-                check_out_time=None,
-                duration_minutes=0,
-                status="Present",
-                confidence=confidence,
-                camera_id=camera_id
-            )
-            db.add(new_session)
+    @classmethod
+    def record_daily_attendance(cls, db, student_id, score, camera_id):
+        # Serialize duplicate checks and inserts across SQLite connections / MySQL workers.
+        if db.bind.dialect.name == "sqlite":
+            db.rollback()
+            db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        student = db.query(Student).filter_by(id=student_id, status="Active").with_for_update().first()
+        if student is None:
+            db.rollback()
+            return {"success": False, "action": "INACTIVE_STUDENT", "message": "Student is inactive or deleted"}
+        now = cls.server_now()
+        local = now.astimezone(ZoneInfo(settings.ATTENDANCE_TIMEZONE))
+        result = {"currentTime": local.isoformat(), "timezone": settings.ATTENDANCE_TIMEZONE,
+                  "session_date": local.date().isoformat(), "similarity": round(score, 4),
+                  "student": {"id": student.id, "student_id": student.student_id,
+                              "full_name": student.full_name, "email": student.email,
+                              "profile_photo_path": student.profile_photo_path,
+                              "department_name": student.department.name if student.department else None,
+                              "course_name": student.course.name if student.course else None}}
+        existing = db.query(AttendanceSession).filter_by(student_id=student.id, session_date=local.date()).order_by(AttendanceSession.check_in_time.asc()).first()
+        action = "ALREADY_RECORDED"
+        if existing is None:
+            cutoff = time.fromisoformat(cls.get_setting(db, "attendance_cutoff_time", cls.DEFAULTS["attendance_cutoff_time"]))
+            start = time.fromisoformat(cls.get_setting(db, "attendance_start_time", cls.DEFAULTS["attendance_start_time"]))
+            cutoff_label = cutoff.strftime("%I:%M %p").lstrip("0")
+            if local.time() >= cutoff:
+                db.rollback()
+                return dict(result, success=False, action="ATTENDANCE_CUTOFF_PASSED",
+                            code="ATTENDANCE_CUTOFF_PASSED", status="Missed Cutoff",
+                            message=f"Attendance must be completed before {cutoff_label}.", cutoffTime=cutoff_label)
+            if local.time() < start:
+                db.rollback()
+                return dict(result, success=False, action="ATTENDANCE_NOT_STARTED", code="ATTENDANCE_NOT_STARTED",
+                            status="Not Started", message=f"Attendance starts at {start.strftime('%I:%M %p').lstrip('0')}.")
+            action = "CHECK_IN"
+            existing = AttendanceSession(student_id=student.id, session_date=local.date(),
+                check_in_time=now.astimezone(timezone.utc).replace(tzinfo=None), status="Present",
+                confidence=score, camera_id=camera_id, duration_minutes=0)
+            db.add(existing)
+            db.add(AttendanceEvent(student_id=student.id, event_type="CHECK_IN",
+                timestamp=existing.check_in_time, confidence=score, camera_id=camera_id,
+                raw_info="Server-validated daily attendance"))
             db.flush()
-
-            # Record event
-            event = AttendanceEvent(
-                student_id=student_id,
-                event_type="CHECK_IN",
-                timestamp=timestamp,
-                confidence=confidence,
-                camera_id=camera_id,
-                raw_info=f"Session #{new_session.id} Check-In created"
-            )
-            db.add(event)
-            db.commit()
-
-            return {
-                "success": True,
-                "action": "CHECK_IN",
-                "message": f"Successfully checked in {student.full_name} ({student.student_id})",
-                "student": {
-                    "id": student.id,
-                    "student_id": student.student_id,
-                    "full_name": student.full_name,
-                    "photo": student.profile_photo_path
-                },
-                "session_id": new_session.id,
-                "timestamp": timestamp.isoformat()
-            }
-        else:
-            # Complete Check-Out on open session if minimum interval (60 seconds) has elapsed
-            duration_sec = (timestamp - open_session.check_in_time).total_seconds()
-            if duration_sec < 60:
-                # Too soon to check out
-                return {
-                    "success": True,
-                    "action": "CHECK_IN_ALREADY_ACTIVE",
-                    "message": f"{student.full_name} is already checked in"
-                }
-
-            open_session.check_out_time = timestamp
-            open_session.duration_minutes = max(1, int(duration_sec / 60))
-            db.add(open_session)
-
-            # Record event
-            event = AttendanceEvent(
-                student_id=student_id,
-                event_type="CHECK_OUT",
-                timestamp=timestamp,
-                confidence=confidence,
-                camera_id=camera_id,
-                raw_info=f"Session #{open_session.id} Check-Out (Duration: {open_session.duration_minutes}m)"
-            )
-            db.add(event)
-            db.commit()
-
-            return {
-                "success": True,
-                "action": "CHECK_OUT",
-                "message": f"Successfully checked out {student.full_name} ({student.student_id})",
-                "student": {
-                    "id": student.id,
-                    "student_id": student.student_id,
-                    "full_name": student.full_name,
-                    "photo": student.profile_photo_path
-                },
-                "session_id": open_session.id,
-                "duration_minutes": open_session.duration_minutes,
-                "timestamp": timestamp.isoformat()
-            }
+        result.update(success=True, action=action, status="Present", session_id=existing.id,
+                      timestamp=existing.check_in_time.replace(tzinfo=timezone.utc).isoformat(),
+                      check_in_time=existing.check_in_time.replace(tzinfo=timezone.utc).isoformat(),
+                      check_out_time=existing.check_out_time.replace(tzinfo=timezone.utc).isoformat() if existing.check_out_time else None,
+                      duration_minutes=existing.duration_minutes)
+        db.commit()
+        return result

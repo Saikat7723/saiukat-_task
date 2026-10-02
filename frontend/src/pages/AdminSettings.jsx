@@ -12,6 +12,8 @@ const formatTime = value => {
 export const AdminSettings = () => {
   const [cameras, setCameras] = useState([]);
   const [settingsData, setSettingsData] = useState({
+    attendance_start_time: '',
+    attendance_cutoff_time: '',
     FACE_RECOGNITION_THRESHOLD: '',
     ATTENDANCE_COOLDOWN_SECONDS: '',
     AUTO_CHECKOUT_HOURS: '',
@@ -108,6 +110,12 @@ export const AdminSettings = () => {
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="border-b border-slate-100 pb-3 text-base font-bold text-slate-900">Attendance Engine Parameters</h2>
           <form onSubmit={handleSaveSettings} className="space-y-4">
+            {['attendance_start_time', 'attendance_cutoff_time'].map(key => <label key={key} className="block text-sm font-semibold text-slate-700">
+              {key === 'attendance_start_time' ? 'Attendance Start Time' : 'Attendance Cutoff Time'}
+              <input required type="time" value={settingsData[key]} onChange={e => setSettingsData({ ...settingsData, [key]: e.target.value })}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>)}
+            <p className="text-xs text-slate-500">Uses the institution timezone. New attendance is accepted only before the cutoff.</p>
             <div>
               <label className="mb-1 block text-sm font-semibold text-slate-700">Face Recognition Confidence Threshold (0.50 - 0.95)</label>
               <input type="number" step="0.05" min="0.5" max="0.95" value={settingsData.FACE_RECOGNITION_THRESHOLD}

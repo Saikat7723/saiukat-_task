@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.database.session import engine, Base, SessionLocal
 from app.core.academic_catalog import ensure_academic_catalog
+from app.attendance.engine import AttendanceEngine
 from app.api.auth import router as auth_router
 from app.api.students import router as student_router
 from app.api.attendance import router as attendance_router
@@ -71,6 +72,7 @@ def startup_event():
                 connection.execute(text(f"ALTER TABLE students ADD COLUMN {column_name} {column_type}"))
     with SessionLocal() as db:
         ensure_academic_catalog(db)
+        AttendanceEngine.ensure_settings(db)
 
 @app.get("/")
 def root():

@@ -1,3 +1,4 @@
+from fastapi.responses import JSONResponse
 import csv
 import io
 from datetime import datetime, date, timedelta, timezone
@@ -97,49 +98,20 @@ def create_manual_attendance(
     db: Session = Depends(get_db),
     current_user: Admin = Depends(get_current_user)
 ):
-    student = db.query(Student).filter(Student.id == manual_in.student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Student not found")
-
-    duration = 0
-    if manual_in.check_out_time and manual_in.check_in_time:
-        duration = max(0, int((manual_in.check_out_time - manual_in.check_in_time).total_seconds() / 60))
-
-    session = AttendanceSession(
-        student_id=manual_in.student_id,
-        session_date=manual_in.session_date,
-        check_in_time=manual_in.check_in_time,
-        check_out_time=manual_in.check_out_time,
-        duration_minutes=duration,
-        status=manual_in.status,
-        confidence=1.0,
-        camera_id="MANUAL_OVERRIDE",
-        notes=manual_in.notes
-    )
-    db.add(session)
-    db.flush()
-
-    audit = AuditLog(
-        admin_id=current_user.id,
-        admin_email=current_user.email,
-        action="ATTENDANCE_MANUAL_CREATE",
-        target_type="AttendanceSession",
-        target_id=str(session.id),
-        details=f"Manual attendance created for student {student.full_name} on {manual_in.session_date}"
-    )
-    db.add(audit)
-    db.commit()
-    db.refresh(session)
-
+    # Manual submissions must not bypass the server clock by supplying an old date/time.
+    result = AttendanceEngine.record_daily_attendance(db, manual_in.student_id, 1.0, "MANUAL_OVERRIDE")
+    if not result["success"]:
+        return JSONResponse(status_code=403, content=result)
+    session = db.get(AttendanceSession, result["session_id"])
+    if result["action"] == "CHECK_IN":
+        session.notes = manual_in.notes
+        db.add(AuditLog(admin_id=current_user.id, admin_email=current_user.email,
+            action="ATTENDANCE_MANUAL_CREATE", target_type="AttendanceSession",
+            target_id=str(session.id), details="Manual attendance validated against server time"))
+        db.commit()
+        db.refresh(session)
     res = AttendanceSessionResponse.model_validate(session)
-    res.student = {
-        "id": student.id,
-        "student_id": student.student_id,
-        "full_name": student.full_name,
-        "email": student.email,
-        "profile_photo_path": student.profile_photo_path,
-        "department_name": student.department.name if student.department else None
-    }
+    res.student = result["student"]
     return res
 
 

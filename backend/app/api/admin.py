@@ -1,4 +1,6 @@
 from typing import List, Optional
+import re
+from app.attendance.engine import AttendanceEngine
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
@@ -57,6 +59,7 @@ def add_camera(
 
 @router.get("/settings")
 def get_attendance_settings(db: Session = Depends(get_db), current_user: Admin = Depends(get_current_user)):
+    AttendanceEngine.ensure_settings(db)
     settings_list = db.query(AttendanceSetting).all()
     return {s.setting_key: s.setting_value for s in settings_list}
 
@@ -66,6 +69,22 @@ def update_attendance_settings(
     db: Session = Depends(get_db),
     current_user: Admin = Depends(require_admin)
 ):
+    times = {key: AttendanceEngine.get_setting(db, key, default) for key, default in AttendanceEngine.DEFAULTS.items()}
+    for key in times:
+        if key in settings_data:
+            value = settings_data[key]
+            if not isinstance(value, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+                raise HTTPException(422, f"{key} must use HH:MM (24-hour time)")
+            times[key] = value
+    if times["attendance_start_time"] >= times["attendance_cutoff_time"]:
+        raise HTTPException(422, "Attendance Start Time must be before Attendance Cutoff Time")
+    if "ATTENDANCE_COOLDOWN_SECONDS" in settings_data:
+        try:
+            cooldown = int(settings_data["ATTENDANCE_COOLDOWN_SECONDS"])
+            if not 1 <= cooldown <= 3600:
+                raise ValueError()
+        except (TypeError, ValueError):
+            raise HTTPException(422, "Attendance cooldown must be between 1 and 3600 seconds")
     for key, val in settings_data.items():
         setting = db.query(AttendanceSetting).filter(AttendanceSetting.setting_key == key).first()
         if setting:
