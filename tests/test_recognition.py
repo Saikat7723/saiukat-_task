@@ -1,4 +1,5 @@
 ﻿"""Regression tests for matching decisions and durable automatic attendance."""
+from datetime import datetime, timezone
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
 from app.main import app
+from app.attendance.engine import AttendanceEngine
 from app.database.session import Base, get_db
 from app.core.config import settings
 from app.core.security import create_access_token
@@ -22,7 +24,8 @@ from app.api import recognition
 from app.face_recognition.engine import FaceRecognitionEngine, MODEL_VERSION, MODEL_DIR, ModelUnavailable
 
 @pytest.fixture
-def setup(tmp_path):
+def setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(AttendanceEngine, "server_now", staticmethod(lambda: datetime(2026, 10, 2, 4, 0, tzinfo=timezone.utc)))
     engine = create_engine(f"sqlite:///{tmp_path / 'attendance.db'}", connect_args={'check_same_thread': False})
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
@@ -37,8 +40,6 @@ def setup(tmp_path):
             yield db
     app.dependency_overrides[get_db] = database
     recognition.observations.clear()
-    recognition.active_presence.clear()
-    recognition.departed_students.clear()
     headers = {'Authorization': f"Bearer {create_access_token({'sub': 'camera@test.com'})}"}
     with TestClient(app) as client:
         yield client, factory, headers
@@ -61,7 +62,7 @@ def test_requires_authentication_and_disables_forged_identity(setup):
     assert client.post('/api/attendance/events', headers=headers, json={'student_id':1, 'confidence':1, 'camera_id':'test-camera'}).status_code == 410
 
 
-def test_continuous_match_does_not_toggle_but_departure_and_reentry_checks_out(setup, monkeypatch):
+def test_continuous_match_and_reentry_preserve_original_attendance(setup, monkeypatch):
     client, factory, headers = setup
     monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: observation([1.0]+[0.0]*127))
     for _ in range(settings.FACE_CONFIRM_FRAMES-1):
@@ -81,19 +82,18 @@ def test_continuous_match_does_not_toggle_but_departure_and_reentry_checks_out(s
         assert db.query(AttendanceEvent).count() == 1
         assert db.query(AttendanceSession).first().check_out_time is None
 
-    # A real absence clears the camera presence state. When the student returns,
-    # a stable verified match closes that active session.
+    # A verified re-entry must preserve the original attendance too.
     monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: (np.zeros((480, 640, 3), np.uint8), []))
     assert send(client, headers).json()['state'] == 'NO_FACE'
     monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: observation([1.0]+[0.0]*127))
     for _ in range(settings.FACE_CONFIRM_FRAMES - 1):
         assert send(client, headers).json()['state'] == 'VERIFYING'
     result = send(client, headers).json()
-    assert result['attendance']['action'] == 'CHECK_OUT'
+    assert result['attendance']['action'] == 'ALREADY_RECORDED'
     with factory() as db:
         session = db.query(AttendanceSession).one()
-        assert session.check_out_time is not None
-        assert db.query(AttendanceEvent).count() == 2
+        assert session.check_out_time is None
+        assert db.query(AttendanceEvent).count() == 1
 
 
 @pytest.mark.parametrize('kind', ['blank', 'unknown', 'multiple', 'blurred', 'legacy', 'inactive', 'ambiguous'])
@@ -189,3 +189,102 @@ def test_real_photo_enrollment_to_attendance(setup, monkeypatch, tmp_path):
         assert result.json()['attendance'] is None
     with factory() as db:
         assert db.query(AttendanceSession).count() == 1
+
+
+@pytest.mark.parametrize('clock,accepted', [('09:30:00', True), ('09:59:59', True), ('10:00:00', False), ('10:15:00', False)])
+def test_cutoff_direct_camera_api_and_database(setup, monkeypatch, clock, accepted):
+    client, factory, headers = setup
+    now = datetime.fromisoformat(f'2026-10-02T{clock}+05:30')
+    monkeypatch.setattr(AttendanceEngine, 'server_now', staticmethod(lambda: now))
+    monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: observation([1.0]+[0.0]*127))
+    for _ in range(settings.FACE_CONFIRM_FRAMES):
+        response = send(client, headers)
+    assert response.status_code == 200
+    result = response.json()
+    attendance = result['attendance']
+    assert attendance['success'] is accepted
+    assert attendance['student']['id'] == 1
+    if not accepted:
+        assert attendance['code'] == 'ATTENDANCE_CUTOFF_PASSED'
+        assert attendance['cutoffTime'] == '10:00 AM'
+        assert attendance['currentTime'] == now.isoformat()
+        assert result['faces'][0]['label'] == 'Student verified — attendance deadline passed'
+        # Camera keeps recognizing; repeated calls cannot insert either sessions or events.
+        assert send(client, headers).json()['attendance']['code'] == 'ATTENDANCE_CUTOFF_PASSED'
+    with factory() as db:
+        assert db.query(AttendanceSession).count() == int(accepted)
+        assert db.query(AttendanceEvent).count() == int(accepted)
+        if accepted:
+            assert db.query(AttendanceSession).one().check_in_time == now.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def test_original_0920_attendance_survives_1030_detection(setup, monkeypatch):
+    client, factory, headers = setup
+    monkeypatch.setattr(recognition.face_engine, 'analyze', lambda data: observation([1.0]+[0.0]*127))
+    now = datetime.fromisoformat('2026-10-02T09:20:00+05:30')
+    monkeypatch.setattr(AttendanceEngine, 'server_now', staticmethod(lambda: now))
+    for _ in range(settings.FACE_CONFIRM_FRAMES):
+        first = send(client, headers).json()['attendance']
+    now = datetime.fromisoformat('2026-10-02T10:30:00+05:30')
+    again = send(client, headers).json()['attendance']
+    assert again['action'] == 'ALREADY_RECORDED'
+    assert again['check_in_time'] == first['check_in_time']
+    assert again['status'] == 'Present'
+    with factory() as db:
+        row = db.query(AttendanceSession).one()
+        assert row.check_in_time == datetime(2026, 10, 2, 3, 50)
+        assert row.check_out_time is None
+        assert db.query(AttendanceEvent).count() == 1
+        # Even a previously closed session counts as today's recorded attendance.
+        row.check_out_time = datetime(2026, 10, 2, 4, 0)
+        db.commit()
+    assert send(client, headers).json()['attendance']['action'] == 'ALREADY_RECORDED'
+    with factory() as db:
+        assert db.query(AttendanceSession).count() == 1
+        assert db.query(AttendanceSession).one().check_out_time == datetime(2026, 10, 2, 4, 0)
+
+
+def test_manual_api_cannot_backdate_after_cutoff(setup, monkeypatch):
+    client, factory, headers = setup
+    monkeypatch.setattr(AttendanceEngine, 'server_now', staticmethod(lambda: datetime.fromisoformat('2026-10-02T10:15:00+05:30')))
+    response = client.post('/api/attendance/manual', headers=headers, json={
+        'student_id': 1, 'session_date': '2026-10-01', 'check_in_time': '2026-10-01T09:20:00+05:30'})
+    assert response.status_code == 403
+    assert response.json()['code'] == 'ATTENDANCE_CUTOFF_PASSED'
+    with factory() as db:
+        assert db.query(AttendanceSession).count() == 0
+        assert db.query(AttendanceEvent).count() == 0
+        result = AttendanceEngine.process_recognition_event(db, 1, .9, 'legacy', timestamp=datetime(2026, 10, 1, 3, 0))
+        assert result['code'] == 'ATTENDANCE_CUTOFF_PASSED'
+        assert db.query(AttendanceSession).count() == 0
+
+
+def test_saved_settings_and_timezone_drive_cutoff(setup, monkeypatch):
+    client, factory, headers = setup
+    monkeypatch.setattr(settings, 'ATTENDANCE_TIMEZONE', 'America/New_York')
+    monkeypatch.setattr(AttendanceEngine, 'server_now', staticmethod(lambda: datetime.fromisoformat('2026-10-03T00:30:00+00:00')))
+    assert client.put('/api/admin/settings', headers=headers, json={'attendance_start_time':'08:00', 'attendance_cutoff_time':'20:31'}).status_code == 200
+    saved = client.get('/api/admin/settings', headers=headers).json()
+    assert saved['attendance_cutoff_time'] == '20:31'
+    with factory() as db:
+        result = recognition.record_daily_attendance(db, 1, .9, 'timezone-camera')
+        assert result['action'] == 'CHECK_IN'
+        assert result['session_date'] == '2026-10-02'
+        row = db.query(AttendanceSession).one()
+        assert str(row.session_date) == '2026-10-02'
+    for invalid in ['25:00', '10:60', '9:00', '', None]:
+        assert client.put('/api/admin/settings', headers=headers, json={'attendance_cutoff_time':invalid}).status_code == 422
+    assert client.put('/api/admin/settings', headers=headers, json={'attendance_start_time':'21:00'}).status_code == 422
+
+
+def test_configured_cutoff_boundary_and_start(setup, monkeypatch):
+    client, factory, headers = setup
+    assert client.put('/api/admin/settings', headers=headers, json={'attendance_start_time':'08:00', 'attendance_cutoff_time':'09:00'}).status_code == 200
+    for clock, code in [('07:59:59', 'ATTENDANCE_NOT_STARTED'), ('09:00:00', 'ATTENDANCE_CUTOFF_PASSED')]:
+        monkeypatch.setattr(AttendanceEngine, 'server_now', staticmethod(lambda: datetime.fromisoformat(f'2026-10-02T{clock}+05:30')))
+        with factory() as db:
+            assert recognition.record_daily_attendance(db, 1, .9, 'camera')['code'] == code
+            assert db.query(AttendanceSession).count() == 0
+    monkeypatch.setattr(AttendanceEngine, 'server_now', staticmethod(lambda: datetime.fromisoformat('2026-10-02T08:00:00+05:30')))
+    with factory() as db:
+        assert recognition.record_daily_attendance(db, 1, .9, 'camera')['action'] == 'CHECK_IN'
