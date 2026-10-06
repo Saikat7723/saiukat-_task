@@ -118,6 +118,8 @@ export const LiveAttendance = () => {
             setLastMatch({ ...attendance, captured: screenshot });
             if (attendance.success && ['CHECK_IN', 'CHECK_OUT'].includes(attendance.action)) {
               speakMessage('Attendance successfully taken');
+            } else if (attendance.action === 'ALREADY_RECORDED') {
+              speakMessage('Attendance already recorded');
             } else if (attendance.success === false) {
               speakMessage('Attendance not accepted');
             }

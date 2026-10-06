@@ -8,7 +8,7 @@ from app.models.attendance import AttendanceSession, AttendanceEvent, Attendance
 
 
 class AttendanceEngine:
-    DEFAULTS = {"attendance_start_time": "00:00", "attendance_cutoff_time": "10:00"}
+    DEFAULTS = {"attendance_start_time": "00:00", "attendance_cutoff_time": "14:00"}
 
     @staticmethod
     def server_now():
