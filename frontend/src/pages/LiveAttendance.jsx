@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Webcam from 'react-webcam';
 import { Camera, CheckCircle2, LogIn, LogOut, Maximize, AlertTriangle, Clock3, ScanFace, UserCheck, Flag } from 'lucide-react';
@@ -8,6 +8,14 @@ const messages = error => typeof error.response?.data?.detail === 'string'
   ? error.response.data.detail : 'Recognition server unavailable. Retrying automatically…';
 const asDate = value => new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`);
 const duration = minutes => minutes === null || minutes === undefined ? '—' : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+
+const speakMessage = (message) => {
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+    const msg = new SpeechSynthesisUtterance(message);
+    window.speechSynthesis.speak(msg);
+  }
+};
 
 export const LiveAttendance = () => {
   const webcam = useRef(null);
@@ -26,6 +34,16 @@ export const LiveAttendance = () => {
   const [checkoutError, setCheckoutError] = useState('');
   const [studentSessions, setStudentSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+
+  const enableAudio = () => {
+    if ('speechSynthesis' in window) {
+      const msg = new SpeechSynthesisUtterance('');
+      msg.volume = 0;
+      window.speechSynthesis.speak(msg);
+    }
+    setIsAudioEnabled(true);
+  };
 
   const institutionTimezone = lastMatch?.timezone || setup?.timezone;
   const time = value => value ? asDate(value).toLocaleTimeString('en-US', { timeZone: institutionTimezone, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
@@ -98,6 +116,11 @@ export const LiveAttendance = () => {
           if (lastDecision.current !== decision) {
             lastDecision.current = decision;
             setLastMatch({ ...attendance, captured: screenshot });
+            if (attendance.success && ['CHECK_IN', 'CHECK_OUT'].includes(attendance.action)) {
+              speakMessage('Attendance successfully taken');
+            } else if (attendance.success === false) {
+              speakMessage('Attendance not accepted');
+            }
           }
         } else {
           lastDecision.current = '';
@@ -204,6 +227,20 @@ export const LiveAttendance = () => {
   const recentSessions = studentSessions.filter(session => !todaySessions.some(today => today.id === session.id)).slice(0, 3);
 
   return (
+    <>
+      {!isAudioEnabled && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900/95 backdrop-blur-sm">
+          <ScanFace size={64} className="mb-6 animate-pulse text-emerald-400" />
+          <h2 className="mb-2 text-3xl font-bold text-white">Live Attendance Kiosk</h2>
+          <p className="mb-8 text-slate-300">Click below to enable the camera and audio announcements.</p>
+          <button 
+            onClick={enableAudio} 
+            className="rounded-full bg-emerald-500 px-8 py-4 text-lg font-bold text-emerald-950 shadow-xl shadow-emerald-900/50 transition hover:bg-emerald-400"
+          >
+            Start Attendance
+          </button>
+        </div>
+      )}
     <div ref={panel} className="min-h-screen space-y-5 bg-slate-50 p-5 text-slate-900">
       <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
         <div><h1 className="flex items-center gap-2 text-2xl font-bold"><span className="h-3 w-3 animate-pulse rounded-full bg-emerald-500" />Live Attendance <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Live</span></h1><p className="mt-1 text-sm text-slate-500">Face recognition is active. Position one face clearly in front of the camera.</p></div>
@@ -241,5 +278,6 @@ export const LiveAttendance = () => {
         </aside>
       </div>
     </div>
+    </>
   );
 };
